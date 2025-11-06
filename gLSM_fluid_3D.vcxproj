@@ -12,6 +12,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="gel.cpp" />
+    <ClCompile Include="SimulationRunner.cpp" />
   </ItemGroup>
   <ItemGroup>
     <CudaCompile Include="gelSystem.cu" />
@@ -21,6 +22,7 @@
     <ClInclude Include="gelParams.h" />
     <ClInclude Include="gelSystem.h" />
     <ClInclude Include="gel_kernel.cuh" />
+    <ClInclude Include="SimulationRunner.h" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <ProjectGuid>{4F45668A-D41D-0389-190D-69D613A58804}</ProjectGuid>

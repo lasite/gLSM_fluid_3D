@@ -1,56 +1,34 @@
-#include "gelSystem.h"
-#include <direct.h>
-#include <string>
+#include "SimulationRunner.h"
+
+#include <cstdlib>
+#include <exception>
 #include <iostream>
 
-using namespace std;
+namespace {
 
-#define runstep 1000000
+SimulationConfig build_default_config() {
+    SimulationConfig config;
+    config.deviceId = 1;
+    config.time = 0;
+    config.runStep = 1'000'000;
+    config.gelSize = make_int3(21, 21, 21);
+    config.fluidSize = make_int3(101, 101, 101);
+    config.iValues = {9};
+    config.jValues = {1};
+    config.kValues = {0};
+    return config;
+}
 
-GelSystem* gel = 0;
+}  // namespace
 
 int main(int argc, char** argv) {
-    cudaSetDevice(1);
-    int time = 0;
-    int count = 0;
-    char originalDirectory[FILENAME_MAX];
-
-    if (!_getcwd(originalDirectory, sizeof(originalDirectory))) {
-        cerr << "Error getting current directory" << endl;
+    try {
+        SimulationRunner runner(build_default_config());
+        runner.run();
+    } catch (const std::exception& ex) {
+        std::cerr << "Simulation failed: " << ex.what() << std::endl;
         return EXIT_FAILURE;
     }
 
-    for (int i = 9; i <= 9; i++) {
-        for (int j = 1; j <= 1; j++) {
-            for (int k = 0; k <= 0; k++) {
-                string directoryName = to_string(count);
-                _mkdir(directoryName.c_str());
-                _chdir(directoryName.c_str());
-
-                int3 gelSize = make_int3(21, 21, 21);
-                int3 fluidSize = make_int3(101, 101, 101);
-                gel = new GelSystem(gelSize, fluidSize, time, i, j, k);
-                gel->m_count = count;
-                cout << count << ", ";
-                cout << "CHS = " << gel->m_params.CHS << ", f = " << gel->m_params.f
-                    << ", ep = " << gel->m_params.ep << ", I = " << gel->m_params.I
-                    << endl;
-
-                for (long long int solverIterations = static_cast<long long int>(time) * gel->m_df; solverIterations <= runstep; solverIterations++) {
-                    if (gel->result) {
-                        gel->update(solverIterations);
-                    }
-                    else {
-                        break;
-                    }
-                }
-
-                delete gel;
-                _chdir(originalDirectory);
-                count++;
-            }
-        }
-    }
-
-    return 0;
+    return EXIT_SUCCESS;
 }
