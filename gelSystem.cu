@@ -27,8 +27,8 @@ void GelSystem::allocateHostStorage()
 	m_hwm = new double[m_numGelElements];
 	memset(m_hwm, 0, m_numGelElements * sizeof(double));
 
-	m_hfilament = new double3[1000 * m_params.maxFilamentlen];
-	memset(m_hfilament, 0, 1000 * m_params.maxFilamentlen * sizeof(bool));
+        m_hfilament = new double3[1000 * m_params.maxFilamentlen];
+        memset(m_hfilament, 0, 1000 * m_params.maxFilamentlen * sizeof(double3));
 
 	//dynamics variables
 	m_hrn = new double3[m_numGelNodes];
@@ -112,14 +112,14 @@ void GelSystem::allocateDeviceStorage()
 	cudaMalloc((void**)&m_dmap_element, m_numGelElements * sizeof(int));
 	cudaMalloc((void**)&m_dmap_node, m_numGelNodes * sizeof(int));
 
-	cudaMalloc((void**)&m_dvm_center, 1000 * sizeof(double));
-	cudaMalloc((void**)&m_dwm_center, 1000 * sizeof(double));
-	cudaMalloc((void**)&m_drm_center, 1000 * sizeof(double3));
-	cudaMalloc((void**)&m_dFn_center, 1000 * sizeof(double3));
-	cudaMalloc((void**)&m_dVeln_center, 1000 * sizeof(double3));
+        cudaMalloc((void**)&m_dvm_center, 1000 * sizeof(double));
+        cudaMalloc((void**)&m_dwm_center, 1000 * sizeof(double));
+        cudaMalloc((void**)&m_drm_center, 1000 * sizeof(double3));
+        cudaMalloc((void**)&m_dFn_center, 1000 * sizeof(double3));
+        cudaMalloc((void**)&m_dVeln_center, 1000 * sizeof(double3));
 
-	cudaMalloc((void**)&m_dtime, sizeof(double));
-	cudaMalloc(&d_hitCnt, sizeof(unsigned int));
+        cudaMalloc((void**)&m_dtime, sizeof(double));
+        cudaMalloc(&d_hitCnt, sizeof(unsigned int));
 
 	cudaMalloc(&d_f, Nd * sizeof(float));
 	cudaMalloc(&d_fpost, Nd * sizeof(float));
@@ -130,11 +130,12 @@ void GelSystem::allocateDeviceStorage()
 	cudaMalloc(&d_F_ibm, N * sizeof(float3));
 	cudaMalloc(&d_F_tot, N * sizeof(float3));
 
-	cudaMalloc(&d_lag, M * sizeof(float3));
-	cudaMalloc(&d_Ul, M * sizeof(float3));
-	cudaMalloc(&d_Vl, M * sizeof(float3));
-	cudaMalloc(&d_Fl, M * sizeof(float3));
-	cudaMalloc(&d_bIndex, M * sizeof(int));
+        cudaMalloc(&d_lag, M * sizeof(float3));
+        cudaMalloc(&d_Ul, M * sizeof(float3));
+        cudaMalloc(&d_Vl, M * sizeof(float3));
+        cudaMalloc(&d_Fl, M * sizeof(float3));
+        cudaMalloc(&d_A, M * sizeof(float));
+        cudaMalloc(&d_bIndex, M * sizeof(int));
 }
 
 int GelSystem::get_index(int xi, int yi, int zi, int size)
@@ -248,20 +249,38 @@ void GelSystem::setInitValue()
 
 void GelSystem::setGoonValue(int time)
 {
-	ifstream frn, fum, fvm, fwm;
-	string str_rn, str_um, str_vm, str_wm;
-	str_rn = "../rn" + to_string(time) + ".dat";
-	str_um = "../um" + to_string(time) + ".dat";
-	str_vm = "../vm" + to_string(time) + ".dat";
-	str_wm = "../wm" + to_string(time) + ".dat";
-	//str_rn = "rn" + to_string(time) + ".dat";
-	//str_um = "um" + to_string(time) + ".dat";
-	//str_vm = "vm" + to_string(time) + ".dat";
-	//str_wm = "wm" + to_string(time) + ".dat";
-	frn.open(str_rn, ios::in);
-	fvm.open(str_vm, ios::in);
-	fum.open(str_um, ios::in);
-	fwm.open(str_wm, ios::in);
+    ifstream frn, fum, fvm, fwm;
+    string str_rn, str_um, str_vm, str_wm;
+    str_rn = "../rn" + to_string(time) + ".dat";
+    str_um = "../um" + to_string(time) + ".dat";
+    str_vm = "../vm" + to_string(time) + ".dat";
+    str_wm = "../wm" + to_string(time) + ".dat";
+    //str_rn = "rn" + to_string(time) + ".dat";
+    //str_um = "um" + to_string(time) + ".dat";
+    //str_vm = "vm" + to_string(time) + ".dat";
+    //str_wm = "wm" + to_string(time) + ".dat";
+    frn.open(str_rn, ios::in);
+    fvm.open(str_vm, ios::in);
+    fum.open(str_um, ios::in);
+    fwm.open(str_wm, ios::in);
+
+    if (!frn.is_open() || !fvm.is_open() || !fum.is_open() || !fwm.is_open()) {
+        cerr << "Failed to open restart files for time " << time << ':' << endl;
+        if (!frn.is_open()) {
+            cerr << "  " << str_rn << endl;
+        }
+        if (!fum.is_open()) {
+            cerr << "  " << str_um << endl;
+        }
+        if (!fvm.is_open()) {
+            cerr << "  " << str_vm << endl;
+        }
+        if (!fwm.is_open()) {
+            cerr << "  " << str_wm << endl;
+        }
+        result = false;
+        return;
+    }
 	string line;
 	for (int zi = 1; zi < m_gelSize.z; zi++) {
 		for (int yi = 1; yi < m_gelSize.y; yi++) {
@@ -417,11 +436,17 @@ void GelSystem::freeHostMemory()
 	delete[] m_hrm;
 	delete[] m_hFn;
 	delete[] m_hVeln;
-	delete[] m_hmap_element;
-	delete[] m_hmap_node;
+        delete[] m_hmap_element;
+        delete[] m_hmap_node;
+        delete[] m_hvm_center;
+        delete[] m_hvm_center_z;
+        delete[] m_hwm_center;
+        delete[] m_hrm_center;
+        delete[] m_hFn_center;
+        delete[] m_hVeln_center;
 
-	free(h_u);
-	free(h_bIndex);
+        delete[] h_u;
+        delete[] h_bIndex;
 }
 
 void GelSystem::freeDeviceMemory()
@@ -448,20 +473,31 @@ void GelSystem::freeDeviceMemory()
 	cudaFree(m_dnmSm);
 	cudaFree(m_dVolm);
 	cudaFree(m_dPrem);
-	cudaFree(m_dmap_element);
-	cudaFree(m_dmap_node);
+        cudaFree(m_dmap_element);
+        cudaFree(m_dmap_node);
+        cudaFree(m_dvm_center);
+        cudaFree(m_dwm_center);
+        cudaFree(m_drm_center);
+        cudaFree(m_dFn_center);
+        cudaFree(m_dVeln_center);
+        cudaFree(m_dtime);
+        cudaFree(m_dc0);
+        cudaFree(d_hitCnt);
 
-	cudaFree(d_f);
-	cudaFree(d_fpost);
-	cudaFree(d_fnext);
-	cudaFree(d_rho);
-	cudaFree(d_u);
-	cudaFree(d_F);
-	cudaFree(d_F_ibm);
-	cudaFree(d_F_tot);
-	cudaFree(d_lag);
-	cudaFree(d_Ul);
-	cudaFree(d_Fl);
+        cudaFree(d_f);
+        cudaFree(d_fpost);
+        cudaFree(d_fnext);
+        cudaFree(d_rho);
+        cudaFree(d_u);
+        cudaFree(d_F);
+        cudaFree(d_F_ibm);
+        cudaFree(d_F_tot);
+        cudaFree(d_lag);
+        cudaFree(d_Ul);
+        cudaFree(d_Vl);
+        cudaFree(d_Fl);
+        cudaFree(d_A);
+        cudaFree(d_bIndex);
 }
 
 void GelSystem::steadyStateValue(double& um, double& vm, double& wm, double phi)
