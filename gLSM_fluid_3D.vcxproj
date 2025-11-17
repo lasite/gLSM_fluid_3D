@@ -11,16 +11,23 @@
     </ProjectConfiguration>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="gel.cpp" />
+    <ClInclude Include="coupling.h" />
+    <ClInclude Include="coupling_kernels.cuh" />
+    <ClInclude Include="fluid.h" />
+    <ClInclude Include="fluid_kernels.cuh" />
+    <ClInclude Include="gel.h" />
+    <ClInclude Include="gel_kernels.cuh" />
   </ItemGroup>
   <ItemGroup>
-    <CudaCompile Include="gelSystem.cu" />
-    <CudaCompile Include="gel_kernel.cu" />
+    <CudaCompile Include="coupling.cu" />
+    <CudaCompile Include="coupling_kernels.cu" />
+    <CudaCompile Include="fluid.cu" />
+    <CudaCompile Include="fluid_kernels.cu" />
+    <CudaCompile Include="gel.cu" />
+    <CudaCompile Include="gel_kernels.cu" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="gelParams.h" />
-    <ClInclude Include="gelSystem.h" />
-    <ClInclude Include="gel_kernel.cuh" />
+    <ClCompile Include="sim.cpp" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <ProjectGuid>{4F45668A-D41D-0389-190D-69D613A58804}</ProjectGuid>
@@ -67,6 +74,7 @@
     </Link>
     <CudaCompile>
       <TargetMachinePlatform>64</TargetMachinePlatform>
+      <CodeGeneration>compute_89,sm_89</CodeGeneration>
     </CudaCompile>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -86,6 +94,7 @@
     </Link>
     <CudaCompile>
       <TargetMachinePlatform>64</TargetMachinePlatform>
+      <CodeGeneration>compute_86,sm_86</CodeGeneration>
     </CudaCompile>
   </ItemDefinitionGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

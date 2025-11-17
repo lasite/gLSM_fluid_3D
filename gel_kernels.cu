@@ -2,11 +2,7 @@
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
 #include <cmath>
-
-#include "gelParams.h"
-
-__constant__ GelParams params;
-__constant__ FluidParams p;
+#include "gel_kernels.cuh"
 
 __device__ static double3 operator+(double3 a, double3 b)
 {
@@ -158,32 +154,37 @@ __device__ static double3 pow(double3 a, int b)
 	return make_double3(pow(a.x, b), pow(a.y, b), pow(a.z, b));
 }
 
-__device__ static int get_index(int xi, int yi, int zi, int size)
+__device__ static int get_index(int xi, int yi, int zi, int size, int LX, int LY)
 {
-	return xi + yi * (params.LX + size) + zi * (params.LY + size) * (params.LX + size);
+	return xi + yi * (LX + size) + zi * (LY + size) * (LX + size);
 }
 
-__device__ static int get_index_rm_loc(int xi, int yi, int zi, int num)
+__device__ static int get_index_rm_loc(int xi, int yi, int zi, int num, int LX, int LY)
 {
-	return num + xi * 8 + yi * (params.LX + 1) * 8 + zi * (params.LY + 1) * (params.LX + 1) * 8;
+	return num + xi * 8 + yi * (LX + 1) * 8 + zi * (LY + 1) * (LX + 1) * 8;
 }
 
-__device__ static int get_index_nmSm(int xi, int yi, int zi, int num)
+__device__ static int get_index_nmSm(int xi, int yi, int zi, int num, int LX, int LY)
 {
-	return num + xi * 6 + yi * (params.LX + 1) * 6 + zi * (params.LY + 1) * (params.LX + 1) * 6;
+	return num + xi * 6 + yi * (LX + 1) * 6 + zi * (LY + 1) * (LX + 1) * 6;
 }
 
 __device__ static double fv(double u, double v, double w, double I = 0)
 {
-	return (1.0 - w) * (1.0 - w) * u - (1.0 - w) * v + I * (0.5 * params.P1 + params.P2);
+	double P1 = 0.0124;
+	double P2 = 0.77;
+	return (1.0 - w) * (1.0 - w) * u - (1.0 - w) * v + I * (0.5 * P1 + P2);
 	//return (1.0 - w) * (1.0 - w) * u - (1.0 - w) * v;
 }
 
-__device__ static double fu(double u, double v, double w, double I = 0)
+__device__ static double fu(double u, double v, double w, double f, double I = 0)
 {
+	double P1 = 0.0124;
+	double P2 = 0.77;
+	double q = 1e-4;
 	double ww = (1.0 - w) * (1.0 - w);
-	return ww * u - u * u - (1.0 - w) * (params.f * v + I * params.P1) * (u - params.q * ww) / (u + params.q * ww) + I * params.P2;
-	//return ww * u - u * u - (1.0 - w) * (params.f * v + I) * (u - params.q * ww) / (u + params.q * ww);
+	return ww * u - u * u - (1.0 - w) * (f * v + I * P1) * (u - q * ww) / (u + q * ww) + I * P2;
+	//return ww * u - u * u - (1.0 - w) * (f * v + I) * (u - q * ww) / (u + q * ww);
 }
 
 __device__ static double3 cal_face_properties(double3 node1, double3 node2, double3 node3, double3 node4, double& vol)
@@ -204,7 +205,7 @@ __device__ __host__ inline double clamp_d(double v, double lo, double hi)
 	return (v < lo) ? lo : (v > hi ? hi : v);
 }
 
-__device__ static bool solveBilinear(double A, double B, double C, double D, double E, double F, double G, double H, double vIso, double& xb, double& yb, double eps = 1e-12)
+__device__ bool solveBilinear(double A, double B, double C, double D, double E, double F, double G, double H, double vIso, double& xb, double& yb, double eps = 1e-12)
 {
 	// ---------- 系数 ----------
 	const double a00 = A - vIso;
@@ -255,18 +256,21 @@ __device__ static bool solveBilinear(double A, double B, double C, double D, dou
 	return false;                        // 没有交点落在单元内
 }
 
-__global__ static void calElementPropertiesD(double3* rn, double3* rm, double3* rm_loc, double3* nmSm, double* volume, double* wm, double* wmp)
+__global__ void calElementPropertiesD(double3* rn, double3* rm, double3* rm_loc, double3* nmSm, double* volume, double* wm, double* wmp, GelParams* gp)
 {
 	int xi = threadIdx.x + blockIdx.x * blockDim.x;
 	int yi = threadIdx.y + blockIdx.y * blockDim.y;
 	int zi = threadIdx.z + blockIdx.z * blockDim.z;
-	if (xi > params.LX || yi > params.LY || zi > params.LZ) {
+	int LX = gp->LX;
+	int LY = gp->LY;
+	int LZ = gp->LZ;
+	if (xi > LX || yi > LY || zi > LZ) {
 		return;
 	}
 
-	int gi = get_index(xi, yi, zi, 1);
-	int gi_rm_loc = get_index_rm_loc(xi, yi, zi, 0);
-	int gi_nmSm = get_index_nmSm(xi, yi, zi, 0);
+	int gi = get_index(xi, yi, zi, 1, LX, LY);
+	int gi_rm_loc = get_index_rm_loc(xi, yi, zi, 0, LX, LY);
+	int gi_nmSm = get_index_nmSm(xi, yi, zi, 0, LX, LY);
 	double3 node[8];
 	double3 bodycenter = make_double3(0, 0, 0);
 	//
@@ -277,7 +281,7 @@ __global__ static void calElementPropertiesD(double3* rn, double3* rm, double3* 
 		for (int j = 0; j < 2; j++) {
 #pragma unroll
 			for (int k = 0; k < 2; k++) {
-				node[count] = rn[get_index(xi + i, yi + j, zi + k, 2)];
+				node[count] = rn[get_index(xi + i, yi + j, zi + k, 2, LX, LY)];
 				bodycenter += node[count];
 				count++;
 			}
@@ -285,6 +289,9 @@ __global__ static void calElementPropertiesD(double3* rn, double3* rm, double3* 
 	}
 	bodycenter /= 8;
 	rm[gi] = bodycenter;
+	//if (xi == 0 && yi == 0 && zi == 0) {
+	//	printf("%f, %f, %f\n", rm[gi].x, rm[gi].y, rm[gi].z);
+	//}
 #pragma unroll
 	for (int i = 0; i < 8; i++) {
 		node[i] -= bodycenter;
@@ -518,7 +525,7 @@ __global__ static void calElementPropertiesD(double3* rn, double3* rm, double3* 
 		vol = detJ_v * k_v;
 		volume[gi] = vol;
 		wmp[gi] = wm[gi];
-		wm[gi] = params.dx * params.dy * params.dz * params.FA0 / vol;
+		wm[gi] = gp->dx * gp->dy * gp->dz * gp->FA0 / vol;
 	}
 	else {
 		double vol = 0;
@@ -528,35 +535,41 @@ __global__ static void calElementPropertiesD(double3* rn, double3* rm, double3* 
 			nmSm[gi_nmSm + i] = cal_face_properties(node[map[i][0]], node[map[i][1]], node[map[i][2]], node[map[i][3]], vol);
 		volume[gi] = vol;
 		wmp[gi] = wm[gi];
-		wm[gi] = params.dx * params.dy * params.dz * params.FA0 / vol;
+		wm[gi] = gp->dx * gp->dy * gp->dz * gp->FA0 / vol;
 	}
+	//if (xi == 1 && yi == 1 && zi == 1) {
+	//	printf("%f, %f\n", wmp[gi], wm[gi]);
+	//}
 }
 
-__global__ static void calPressureD(double* pm, double* vm, double* wm)
+__global__ void calPressureD(double* pm, double* vm, double* wm, GelParams* gp)
 {
 	int xi = threadIdx.x + blockIdx.x * blockDim.x + 1;
 	int yi = threadIdx.y + blockIdx.y * blockDim.y + 1;
 	int zi = threadIdx.z + blockIdx.z * blockDim.z + 1;
-	if (xi > params.LX - 1 || yi > params.LY - 1 || zi > params.LZ - 1) {
+	int LX = gp->LX;
+	int LY = gp->LY;
+	int LZ = gp->LZ;
+	if (xi > LX - 1 || yi > LY - 1 || zi > LZ - 1) {
 		return;
 	}
-	int gi = get_index(xi, yi, zi, 1);
+	int gi = get_index(xi, yi, zi, 1, LX, LY);
 	double wmt = wm[gi];
-	pm[gi] = -(wmt + log(1.0 - wmt) + (params.CH0 + params.CH1 * wmt) * wmt * wmt) + params.C0 * wmt / (2.0 * params.FA0) + params.CHS * wmt * vm[gi];
+	pm[gi] = -(wmt + log(1.0 - wmt) + (gp->CH0 + gp->CH1 * wmt) * wmt * wmt) + gp->C0 * wmt / (2.0 * gp->FA0) + gp->CHS * wmt * vm[gi];
 }
 
-__global__ static void calNodesVelocityD(double3* rn, double3* ven, double3* ves, double3* Fn, double3* nmSm, double* pm, double* wm)
+__global__ void calNodesVelocityD(double3* rn, double3* ven, double3* ves, double3* Fn, double3* nmSm, double* pm, double* wm, GelParams* gp)
 {
 	int xi = threadIdx.x + blockIdx.x * blockDim.x + 1;
 	int yi = threadIdx.y + blockIdx.y * blockDim.y + 1;
 	int zi = threadIdx.z + blockIdx.z * blockDim.z + 1;
-	int LX = params.LX;
-	int LY = params.LY;
-	int LZ = params.LZ;
+	int LX = gp->LX;
+	int LY = gp->LY;
+	int LZ = gp->LZ;
 	if (xi > LX || yi > LY || zi > LZ) {
 		return;
 	}
-	int gi = get_index(xi, yi, zi, 2);
+	int gi = get_index(xi, yi, zi, 2, LX, LY);
 	//calculate mobility
 	double wn = 0;
 #pragma unroll
@@ -565,118 +578,133 @@ __global__ static void calNodesVelocityD(double3* rn, double3* ven, double3* ves
 		for (int j = 0; j < 2; j++)
 #pragma unroll
 			for (int k = 0; k < 2; k++)
-				wn += wm[get_index(xi - i, yi - j, zi - k, 1)];
+				wn += wm[get_index(xi - i, yi - j, zi - k, 1, LX, LY)];
 	wn /= 8;
-	double Mn = 8. * params.AZ0 * sqrt(params.FA0 / wn) * (1 - wn) / (params.dx * params.dy * params.dz);
+	double Mn = 8. * gp->AZ0 * sqrt(gp->FA0 / wn) * (1 - wn) / (gp->dx * gp->dy * gp->dz);
 	//calculate force
 	double3 f1n = make_double3(0., 0., 0.);
 	double3 f2n = make_double3(0., 0., 0.);
 	double3 rn_m = rn[gi];
 	int gi_nmSm;
 	if (xi < LX && yi < LY && zi < LZ) {
-		gi_nmSm = get_index_nmSm(xi, yi, zi, 0);
-		f1n += rn[get_index(xi + 1, yi + 1, zi + 1, 2)] + rn[get_index(xi, yi + 1, zi + 1, 2)] + rn[get_index(xi + 1, yi, zi + 1, 2)] + rn[get_index(xi + 1, yi + 1, zi, 2)] - 4 * rn_m;
-		f2n += pm[get_index(xi, yi, zi, 1)] * (nmSm[gi_nmSm] + nmSm[gi_nmSm + 2] + nmSm[gi_nmSm + 4]);
+		gi_nmSm = get_index_nmSm(xi, yi, zi, 0, LX, LY);
+		f1n += rn[get_index(xi + 1, yi + 1, zi + 1, 2, LX, LY)] + rn[get_index(xi, yi + 1, zi + 1, 2, LX, LY)] + rn[get_index(xi + 1, yi, zi + 1, 2, LX, LY)] + rn[get_index(xi + 1, yi + 1, zi, 2, LX, LY)] - 4 * rn_m;
+		f2n += pm[get_index(xi, yi, zi, 1, LX, LY)] * (nmSm[gi_nmSm] + nmSm[gi_nmSm + 2] + nmSm[gi_nmSm + 4]);
 	}
 	if (xi < LX && yi < LY && zi > 1) {
-		gi_nmSm = get_index_nmSm(xi, yi, zi - 1, 0);
-		f1n += rn[get_index(xi + 1, yi + 1, zi - 1, 2)] + rn[get_index(xi, yi + 1, zi - 1, 2)] + rn[get_index(xi + 1, yi, zi - 1, 2)] + rn[get_index(xi + 1, yi + 1, zi, 2)] - 4 * rn_m;
-		f2n += pm[get_index(xi, yi, zi - 1, 1)] * (nmSm[gi_nmSm] + nmSm[gi_nmSm + 2] + nmSm[gi_nmSm + 5]);
+		gi_nmSm = get_index_nmSm(xi, yi, zi - 1, 0, LX, LY);
+		f1n += rn[get_index(xi + 1, yi + 1, zi - 1, 2, LX, LY)] + rn[get_index(xi, yi + 1, zi - 1, 2, LX, LY)] + rn[get_index(xi + 1, yi, zi - 1, 2, LX, LY)] + rn[get_index(xi + 1, yi + 1, zi, 2, LX, LY)] - 4 * rn_m;
+		f2n += pm[get_index(xi, yi, zi - 1, 1, LX, LY)] * (nmSm[gi_nmSm] + nmSm[gi_nmSm + 2] + nmSm[gi_nmSm + 5]);
 	}
 	if (xi < LX && yi > 1 && zi < LZ) {
-		gi_nmSm = get_index_nmSm(xi, yi - 1, zi, 0);
-		f1n += rn[get_index(xi + 1, yi - 1, zi + 1, 2)] + rn[get_index(xi, yi - 1, zi + 1, 2)] + rn[get_index(xi + 1, yi, zi + 1, 2)] + rn[get_index(xi + 1, yi - 1, zi, 2)] - 4 * rn_m;
-		f2n += pm[get_index(xi, yi - 1, zi, 1)] * (nmSm[gi_nmSm] + nmSm[gi_nmSm + 3] + nmSm[gi_nmSm + 4]);
+		gi_nmSm = get_index_nmSm(xi, yi - 1, zi, 0, LX, LY);
+		f1n += rn[get_index(xi + 1, yi - 1, zi + 1, 2, LX, LY)] + rn[get_index(xi, yi - 1, zi + 1, 2, LX, LY)] + rn[get_index(xi + 1, yi, zi + 1, 2, LX, LY)] + rn[get_index(xi + 1, yi - 1, zi, 2, LX, LY)] - 4 * rn_m;
+		f2n += pm[get_index(xi, yi - 1, zi, 1, LX, LY)] * (nmSm[gi_nmSm] + nmSm[gi_nmSm + 3] + nmSm[gi_nmSm + 4]);
 	}
 	if (xi < LX && yi > 1 && zi > 1) {
-		gi_nmSm = get_index_nmSm(xi, yi - 1, zi - 1, 0);
-		f1n += rn[get_index(xi + 1, yi - 1, zi - 1, 2)] + rn[get_index(xi, yi - 1, zi - 1, 2)] + rn[get_index(xi + 1, yi, zi - 1, 2)] + rn[get_index(xi + 1, yi - 1, zi, 2)] - 4 * rn_m;
-		f2n += pm[get_index(xi, yi - 1, zi - 1, 1)] * (nmSm[gi_nmSm] + nmSm[gi_nmSm + 3] + nmSm[gi_nmSm + 5]);
+		gi_nmSm = get_index_nmSm(xi, yi - 1, zi - 1, 0, LX, LY);
+		f1n += rn[get_index(xi + 1, yi - 1, zi - 1, 2, LX, LY)] + rn[get_index(xi, yi - 1, zi - 1, 2, LX, LY)] + rn[get_index(xi + 1, yi, zi - 1, 2, LX, LY)] + rn[get_index(xi + 1, yi - 1, zi, 2, LX, LY)] - 4 * rn_m;
+		f2n += pm[get_index(xi, yi - 1, zi - 1, 1, LX, LY)] * (nmSm[gi_nmSm] + nmSm[gi_nmSm + 3] + nmSm[gi_nmSm + 5]);
 	}
 	if (xi > 1 && yi < LY && zi < LZ) {
-		gi_nmSm = get_index_nmSm(xi - 1, yi, zi, 0);
-		f1n += rn[get_index(xi - 1, yi + 1, zi + 1, 2)] + rn[get_index(xi, yi + 1, zi + 1, 2)] + rn[get_index(xi - 1, yi, zi + 1, 2)] + rn[get_index(xi - 1, yi + 1, zi, 2)] - 4 * rn_m;
-		f2n += pm[get_index(xi - 1, yi, zi, 1)] * (nmSm[gi_nmSm + 1] + nmSm[gi_nmSm + 2] + nmSm[gi_nmSm + 4]);
+		gi_nmSm = get_index_nmSm(xi - 1, yi, zi, 0, LX, LY);
+		f1n += rn[get_index(xi - 1, yi + 1, zi + 1, 2, LX, LY)] + rn[get_index(xi, yi + 1, zi + 1, 2, LX, LY)] + rn[get_index(xi - 1, yi, zi + 1, 2, LX, LY)] + rn[get_index(xi - 1, yi + 1, zi, 2, LX, LY)] - 4 * rn_m;
+		f2n += pm[get_index(xi - 1, yi, zi, 1, LX, LY)] * (nmSm[gi_nmSm + 1] + nmSm[gi_nmSm + 2] + nmSm[gi_nmSm + 4]);
 	}
 	if (xi > 1 && yi < LY && zi > 1) {
-		gi_nmSm = get_index_nmSm(xi - 1, yi, zi - 1, 0);
-		f1n += rn[get_index(xi - 1, yi + 1, zi - 1, 2)] + rn[get_index(xi, yi + 1, zi - 1, 2)] + rn[get_index(xi - 1, yi, zi - 1, 2)] + rn[get_index(xi - 1, yi + 1, zi, 2)] - 4 * rn_m;
-		f2n += pm[get_index(xi - 1, yi, zi - 1, 1)] * (nmSm[gi_nmSm + 1] + nmSm[gi_nmSm + 2] + nmSm[gi_nmSm + 5]);
+		gi_nmSm = get_index_nmSm(xi - 1, yi, zi - 1, 0, LX, LY);
+		f1n += rn[get_index(xi - 1, yi + 1, zi - 1, 2, LX, LY)] + rn[get_index(xi, yi + 1, zi - 1, 2, LX, LY)] + rn[get_index(xi - 1, yi, zi - 1, 2, LX, LY)] + rn[get_index(xi - 1, yi + 1, zi, 2, LX, LY)] - 4 * rn_m;
+		f2n += pm[get_index(xi - 1, yi, zi - 1, 1, LX, LY)] * (nmSm[gi_nmSm + 1] + nmSm[gi_nmSm + 2] + nmSm[gi_nmSm + 5]);
 	}
 	if (xi > 1 && yi > 1 && zi < LZ) {
-		gi_nmSm = get_index_nmSm(xi - 1, yi - 1, zi, 0);
-		f1n += rn[get_index(xi - 1, yi - 1, zi + 1, 2)] + rn[get_index(xi, yi - 1, zi + 1, 2)] + rn[get_index(xi - 1, yi, zi + 1, 2)] + rn[get_index(xi - 1, yi - 1, zi, 2)] - 4 * rn_m;
-		f2n += pm[get_index(xi - 1, yi - 1, zi, 1)] * (nmSm[gi_nmSm + 1] + nmSm[gi_nmSm + 3] + nmSm[gi_nmSm + 4]);
+		gi_nmSm = get_index_nmSm(xi - 1, yi - 1, zi, 0, LX, LY);
+		f1n += rn[get_index(xi - 1, yi - 1, zi + 1, 2, LX, LY)] + rn[get_index(xi, yi - 1, zi + 1, 2, LX, LY)] + rn[get_index(xi - 1, yi, zi + 1, 2, LX, LY)] + rn[get_index(xi - 1, yi - 1, zi, 2, LX, LY)] - 4 * rn_m;
+		f2n += pm[get_index(xi - 1, yi - 1, zi, 1, LX, LY)] * (nmSm[gi_nmSm + 1] + nmSm[gi_nmSm + 3] + nmSm[gi_nmSm + 4]);
 	}
 	if (xi > 1 && yi > 1 && zi > 1) {
-		gi_nmSm = get_index_nmSm(xi - 1, yi - 1, zi - 1, 0);
-		f1n += rn[get_index(xi - 1, yi - 1, zi - 1, 2)] + rn[get_index(xi, yi - 1, zi - 1, 2)] + rn[get_index(xi - 1, yi, zi - 1, 2)] + rn[get_index(xi - 1, yi - 1, zi, 2)] - 4 * rn_m;
-		f2n += pm[get_index(xi - 1, yi - 1, zi - 1, 1)] * (nmSm[gi_nmSm + 1] + nmSm[gi_nmSm + 3] + nmSm[gi_nmSm + 5]);
+		gi_nmSm = get_index_nmSm(xi - 1, yi - 1, zi - 1, 0, LX, LY);
+		f1n += rn[get_index(xi - 1, yi - 1, zi - 1, 2, LX, LY)] + rn[get_index(xi, yi - 1, zi - 1, 2, LX, LY)] + rn[get_index(xi - 1, yi, zi - 1, 2, LX, LY)] + rn[get_index(xi - 1, yi - 1, zi, 2, LX, LY)] - 4 * rn_m;
+		f2n += pm[get_index(xi - 1, yi - 1, zi - 1, 1, LX, LY)] * (nmSm[gi_nmSm + 1] + nmSm[gi_nmSm + 3] + nmSm[gi_nmSm + 5]);
 	}
 
-	f1n *= pow(params.dx * params.dy * params.dz, 1 / 3) * params.C0 / 12.;
+	f1n *= pow(gp->dx * gp->dy * gp->dz, 1 / 3) * gp->C0 / 12.;
 	f2n /= 4.;
 	//if (xi == 1 && yi == 1 && zi == 1) {
 	//	printf("%f, %f, %f\n", Fn[gi].x, Fn[gi].y, Fn[gi].z);
 	//}
-	Fn[gi] += f1n + f2n;
+	Fn[gi] = f1n + f2n;
 	ven[gi] = Mn * Fn[gi];
 	ves[gi] = -wn * ven[gi] / (1 - wn);
 	//if (xi == 1 && yi == 1 && zi == 1) {
-	//	printf("%f, %f, %f\n", f1n.x + f2n.x, f1n.y + f2n.y, f1n.z + f2n.z);
+	//	printf("%f, %f, %f\n", ves[gi].x, ves[gi].y, ves[gi].z);
 	//}
-	Fn[gi] = make_double3(0, 0, 0);
+	//Fn[gi] = make_double3(0, 0, 0);
 }
 
-__global__ static void calInternalNodesPositionD(double3* rn, double3* ven)
+__global__ void calInternalNodesPositionD(double3* rn, double3* ven, GelParams* gp)
 {
 	int xi = threadIdx.x + blockIdx.x * blockDim.x + 1;
 	int yi = threadIdx.y + blockIdx.y * blockDim.y + 1;
 	int zi = threadIdx.z + blockIdx.z * blockDim.z + 1;
-	if (xi > params.LX || yi > params.LY || zi > params.LZ) {
+	int LX = gp->LX;
+	int LY = gp->LY;
+	int LZ = gp->LZ;
+	if (xi > LX || yi > LY || zi > LZ) {
 		return;
 	}
-	int gi = get_index(xi, yi, zi, 2);
-	rn[gi] += params.dtx * ven[gi];
+	int gi = get_index(xi, yi, zi, 2, LX, LY);
+	rn[gi] += gp->dtx * ven[gi];
+	//if (xi == 1 && yi == 1 && zi == 1) {
+	//	printf("%f, %f, %f\n", rn[gi].x, rn[gi].y, rn[gi].z);
+	//}
 }
 
-__global__ static void calServiceNodesPositionD(double3* rn, int* map_node)
+__global__ void calServiceNodesPositionD(double3* rn, int* map_node, GelParams* gp)
 {
 	int xi = threadIdx.x + blockIdx.x * blockDim.x;
 	int yi = threadIdx.y + blockIdx.y * blockDim.y;
 	int zi = threadIdx.z + blockIdx.z * blockDim.z;
-	int gi = get_index(xi, yi, zi, 2);
+	int LX = gp->LX;
+	int LY = gp->LY;
+	int LZ = gp->LZ;
+	int gi = get_index(xi, yi, zi, 2, LX, LY);
 	int node_type = map_node[gi];
-	if (node_type == 0 || xi > params.LX + 1 || yi > params.LY + 1 || zi > params.LZ + 1) {
+	if (node_type == 0 || xi > LX + 1 || yi > LY + 1 || zi > LZ + 1) {
 		return;
 	}
-	int gi1 = get_index(xi + params.rn_offset[node_type].x, yi + params.rn_offset[node_type].y, zi + params.rn_offset[node_type].z, 2);
-	int gi2 = get_index(xi + 2 * params.rn_offset[node_type].x, yi + 2 * params.rn_offset[node_type].y, zi + 2 * params.rn_offset[node_type].z, 2);
+	int gi1 = get_index(xi + gp->rn_offset[node_type].x, yi + gp->rn_offset[node_type].y, zi + gp->rn_offset[node_type].z, 2, LX, LY);
+	int gi2 = get_index(xi + 2 * gp->rn_offset[node_type].x, yi + 2 * gp->rn_offset[node_type].y, zi + 2 * gp->rn_offset[node_type].z, 2, LX, LY);
 	rn[gi] = 2 * rn[gi1] - rn[gi2];
+	//if (xi == 0 && yi == 0 && zi == 0) {
+	//	printf("%f, %f, %f\n", rn[gi].x, rn[gi].y, rn[gi].z);
+	//}
 }
 
-__global__ static void calTermsD(double* T0, double* T1, double* T2, double* wm, double* wmp, double3* ven, double3* nmSm, double* volume, double3* rm_loc, double* un_norm, double* um_norm, double3* rm)
+__global__ void calTermsD(double* T0, double* T1, double* T2, double* wm, double* wmp, double3* ven, double3* nmSm, double* volume, double3* rm_loc, double* un_norm, double* um_norm, double3* rm, GelParams* gp)
 {
 	int xi = threadIdx.x + blockIdx.x * blockDim.x + 1;
 	int yi = threadIdx.y + blockIdx.y * blockDim.y + 1;
 	int zi = threadIdx.z + blockIdx.z * blockDim.z + 1;
-	if (xi > params.LX - 1 || yi > params.LY - 1 || zi > params.LZ - 1) {
+	int LX = gp->LX;
+	int LY = gp->LY;
+	int LZ = gp->LZ;
+	if (xi > LX - 1 || yi > LY - 1 || zi > LZ - 1) {
 		return;
 	}
-	int gi = get_index(xi, yi, zi, 1);
+	int gi = get_index(xi, yi, zi, 1, LX, LY);
 
 	double wm_m = wm[gi];
 	double um_m = um_norm[gi];
 	double3 rm_m = rm[gi];
 	//cal T0
 
-	T0[gi] = (1 - wm_m / wmp[gi]) / params.dtx;
+	T0[gi] = (1 - wm_m / wmp[gi]) / gp->dtx;
 
 	//cal T1
 	double dT1 = 0;
 	double3 vmum = make_double3(0, 0, 0);
 	int count = 0;
-	int gi_rm_loc = get_index_rm_loc(xi, yi, zi, 0);
+	int gi_rm_loc = get_index_rm_loc(xi, yi, zi, 0, LX, LY);
 #pragma unroll
 	for (int i = 0; i < 2; i++) {
 #pragma unroll
@@ -685,13 +713,13 @@ __global__ static void calTermsD(double* T0, double* T1, double* T2, double* wm,
 			for (int k = 0; i < 2; i++) {
 				int id1 = gi_rm_loc + count;
 				count++;
-				int id2 = get_index(xi + i, yi + j, zi + k, 2);
+				int id2 = get_index(xi + i, yi + j, zi + k, 2, LX, LY);
 				double N = 0.125 * (1 + (2 * double(i) - 1) * rm_loc[id1].x) * (1 + (2 * double(j) - 1) * rm_loc[id1].y) * (1 + (2 * double(k) - 1) * rm_loc[id1].z);
 				vmum += N * ven[id2] * un_norm[id2];
 			}
 		}
 	}
-	int gi_nmSm = get_index_nmSm(xi, yi, zi, 0);
+	int gi_nmSm = get_index_nmSm(xi, yi, zi, 0, LX, LY);
 #pragma unroll
 	for (int i = 0; i < 6; i++) {
 		dT1 += nmSm[gi_nmSm + i] * vmum;
@@ -699,12 +727,12 @@ __global__ static void calTermsD(double* T0, double* T1, double* T2, double* wm,
 	T1[gi] = dT1 / volume[gi];
 
 	//cal T2
-	int gi1 = get_index(xi + 1, yi, zi, 1);
-	int gi2 = get_index(xi - 1, yi, zi, 1);
-	int gi3 = get_index(xi, yi + 1, zi, 1);
-	int gi4 = get_index(xi, yi - 1, zi, 1);
-	int gi5 = get_index(xi, yi, zi + 1, 1);
-	int gi6 = get_index(xi, yi, zi - 1, 1);
+	int gi1 = get_index(xi + 1, yi, zi, 1, LX, LY);
+	int gi2 = get_index(xi - 1, yi, zi, 1, LX, LY);
+	int gi3 = get_index(xi, yi + 1, zi, 1, LX, LY);
+	int gi4 = get_index(xi, yi - 1, zi, 1, LX, LY);
+	int gi5 = get_index(xi, yi, zi + 1, 1, LX, LY);
+	int gi6 = get_index(xi, yi, zi - 1, 1, LX, LY);
 
 	double3 a_add = make_double3(distance(rm[gi1], rm_m), distance(rm[gi3], rm_m), distance(rm[gi5], rm_m));
 	double3 a_sub = make_double3(distance(rm[gi2], rm_m), distance(rm[gi4], rm_m), distance(rm[gi6], rm_m));
@@ -722,29 +750,33 @@ __global__ static void calTermsD(double* T0, double* T1, double* T2, double* wm,
 	double3 dum = (um_m * (a_add2 - a_sub2) + (um_add ^ a_sub2) - (um_sub ^ a_add2)) / a_addsub;
 	double3 d2um = 2 * ((um_add ^ a_sub) + (um_sub ^ a_add) - um_m * (a_add + a_sub)) / a_addsub;
 	T2[gi] = -(dwm * dum) + (1 - wm_m) * (d2um.x + d2um.y + d2um.z);
+	//if (xi == 1 && yi == 1 && zi == 1) {
+	//	//printf("%f, %f, %f\n", T0[gi], T1[gi], T2[gi]);
+	//	printf("%f, %f, %f\n", wm_m, wmp[gi], gp->dtx);
+	//}
 }
 
-__global__ static void calChemD(double* vm, double* um, double* wm, double* T0, double* T1, double* T2, double3* rm, int time)
+__global__ void calChemD(double* vm, double* um, double* wm, double* T0, double* T1, double* T2, double3* rm, int time, GelParams* gp)
 {
 	int xi = threadIdx.x + blockIdx.x * blockDim.x + 1;
 	int yi = threadIdx.y + blockIdx.y * blockDim.y + 1;
 	int zi = threadIdx.z + blockIdx.z * blockDim.z + 1;
-	if (xi > params.LX - 1 || yi > params.LY - 1 || zi > params.LZ - 1) {
+	int LX = gp->LX;
+	int LY = gp->LY;
+	int LZ = gp->LZ;
+	if (xi > LX - 1 || yi > LY - 1 || zi > LZ - 1) {
 		return;
 	}
-	int gi = get_index(xi, yi, zi, 1);
-	//double I = params.I * xi / params.LX;
+	int gi = get_index(xi, yi, zi, 1, LX, LY);
+	//double I = gp->I * xi / gp->LX;
 	double I = 0;
-	if (time > 10000) {
-		I = 0.01 * zi / params.LZ;
-	}
 
 	double dvm = vm[gi];
 	double dum = um[gi];
 	double dwm = wm[gi];
 	//Forward Euler method
-	//vm[gi] += params.dt * (-dvm * T0[gi] + params.ep * fv(dum, dvm, dwm, I));
-	//um[gi] += params.dt * (-dum * T0[gi] + T1[gi] + T2[gi] + fu(dum, dvm, dwm, I));
+	//vm[gi] += gp->dt * (-dvm * T0[gi] + gp->ep * fv(dum, dvm, dwm, I));
+	//um[gi] += gp->dt * (-dum * T0[gi] + T1[gi] + T2[gi] + fu(dum, dvm, dwm, I));
 
 
 	//Fourth order Runge Kutta method
@@ -752,44 +784,44 @@ __global__ static void calChemD(double* vm, double* um, double* wm, double* T0, 
 	double k1_um, k2_um, k3_um, k4_um;
 
 	// k1
-	k1_vm = params.dt * (-dvm * T0[gi] + params.ep * fv(dum, dvm, dwm, I));
-	k1_um = params.dt * (-dum * T0[gi] + T1[gi] + T2[gi] + fu(dum, dvm, dwm, I));
+	k1_vm = gp->dt * (-dvm * T0[gi] + gp->ep * fv(dum, dvm, dwm, I));
+	k1_um = gp->dt * (-dum * T0[gi] + T1[gi] + T2[gi] + fu(dum, dvm, dwm, I));
 
 	// k2
-	k2_vm = params.dt * (-dvm * (T0[gi] + 0.5 * k1_vm) + params.ep * fv(dum + 0.5 * k1_um, dvm + 0.5 * k1_vm, dwm, I));
-	k2_um = params.dt * (-dum * (T0[gi] + 0.5 * k1_vm) + (T1[gi] + 0.5 * k1_um) + (T2[gi] + 0.5 * k1_um) + fu(dum + 0.5 * k1_um, dvm + 0.5 * k1_vm, dwm, I));
+	k2_vm = gp->dt * (-dvm * (T0[gi] + 0.5 * k1_vm) + gp->ep * fv(dum + 0.5 * k1_um, dvm + 0.5 * k1_vm, dwm, I));
+	k2_um = gp->dt * (-dum * (T0[gi] + 0.5 * k1_vm) + (T1[gi] + 0.5 * k1_um) + (T2[gi] + 0.5 * k1_um) + fu(dum + 0.5 * k1_um, dvm + 0.5 * k1_vm, dwm, I));
 
 	// k3
-	k3_vm = params.dt * (-dvm * (T0[gi] + 0.5 * k2_vm) + params.ep * fv(dum + 0.5 * k2_um, dvm + 0.5 * k2_vm, dwm, I));
-	k3_um = params.dt * (-dum * (T0[gi] + 0.5 * k2_vm) + (T1[gi] + 0.5 * k2_um) + (T2[gi] + 0.5 * k2_um) + fu(dum + 0.5 * k2_um, dvm + 0.5 * k2_vm, dwm, I));
+	k3_vm = gp->dt * (-dvm * (T0[gi] + 0.5 * k2_vm) + gp->ep * fv(dum + 0.5 * k2_um, dvm + 0.5 * k2_vm, dwm, I));
+	k3_um = gp->dt * (-dum * (T0[gi] + 0.5 * k2_vm) + (T1[gi] + 0.5 * k2_um) + (T2[gi] + 0.5 * k2_um) + fu(dum + 0.5 * k2_um, dvm + 0.5 * k2_vm, dwm, I));
 
 	// k4
-	k4_vm = params.dt * (-dvm * (T0[gi] + k3_vm) + params.ep * fv(dum + k3_um, dvm + k3_vm, dwm, I));
-	k4_um = params.dt * (-dum * (T0[gi] + k3_vm) + (T1[gi] + k3_um) + (T2[gi] + k3_um) + fu(dum + k3_um, dvm + k3_vm, dwm, I));
-
+	k4_vm = gp->dt * (-dvm * (T0[gi] + k3_vm) + gp->ep * fv(dum + k3_um, dvm + k3_vm, dwm, I));
+	k4_um = gp->dt * (-dum * (T0[gi] + k3_vm) + (T1[gi] + k3_um) + (T2[gi] + k3_um) + fu(dum + k3_um, dvm + k3_vm, dwm, I));
 	vm[gi] += (k1_vm + 2 * k2_vm + 2 * k3_vm + k4_vm) / 6;
 	um[gi] += (k1_um + 2 * k2_um + 2 * k3_um + k4_um) / 6;
-	//if (time == 1000 && yi < params.LY / 2) {
-	//	//printf("%d,%d,%d,%d,%f,%f\n", time,xi,yi,zi, params.vss, params.uss);
-	//	vm[gi] = params.vss;
-	//	um[gi] = params.uss;
+	//if (xi == 1 && yi == 1 && zi == 1) {
+	//	printf("%f, %f\n", vm[gi], um[gi]);
 	//}
 }
 
-__global__ static void calChemBoundaryD(double* um, double* um_norm, double* vm, double* vm_norm, double* wm, int* map_element, int time)
+__global__ void calChemBoundaryD(double* um, double* um_norm, double* vm, double* vm_norm, double* wm, int* map_element, int time, GelParams* gp)
 {
 	int xi = threadIdx.x + blockIdx.x * blockDim.x;
 	int yi = threadIdx.y + blockIdx.y * blockDim.y;
 	int zi = threadIdx.z + blockIdx.z * blockDim.z;
-	int gi = get_index(xi, yi, zi, 1);
+	int LX = gp->LX;
+	int LY = gp->LY;
+	int LZ = gp->LZ;
+	int gi = get_index(xi, yi, zi, 1, LX, LY);
 	int element_type = map_element[gi];
-	if (xi > params.LX || yi > params.LY || zi > params.LZ) {
+	if (xi > LX || yi > LY || zi > LZ) {
 		return;
 	}
 	//Periodic Boundary
-	//int gi1 = get_index(xi + params.um_offset_periodic[element_type].x, yi + params.um_offset_periodic[element_type].y, zi + params.um_offset_periodic[element_type].z, 1);
+	//int gi1 = get_index(xi + gp->um_offset_periodic[element_type].x, yi + gp->um_offset_periodic[element_type].y, zi + gp->um_offset_periodic[element_type].z, 1);
 	//No-flux Boundary
-	int gi1 = get_index(xi + params.um_offset_noflux[element_type].x, yi + params.um_offset_noflux[element_type].y, zi + params.um_offset_noflux[element_type].z, 1);
+	int gi1 = get_index(xi + gp->um_offset_noflux[element_type].x, yi + gp->um_offset_noflux[element_type].y, zi + gp->um_offset_noflux[element_type].z, 1, LX, LY);
 	um[gi] = um[gi1];
 	vm[gi] = vm[gi1];
 	//if (element_type == 1) {
@@ -800,14 +832,20 @@ __global__ static void calChemBoundaryD(double* um, double* um_norm, double* vm,
 	//}
 	um_norm[gi] = um[gi] / (1 - wm[gi]);
 	vm_norm[gi] = vm[gi] / (1 - wm[gi]);
+	//if (xi == 1 && yi == 1 && zi == 1) {
+	//	printf("%f, %f\n", vm_norm[gi], um_norm[gi]);
+	//}
 }
 
-__global__ static void calUnnormD(double* un_norm, double* um_norm, double* vn_norm, double* vm_norm)
+__global__ void calUnnormD(double* un_norm, double* um_norm, double* vn_norm, double* vm_norm, GelParams* gp)
 {
 	int xi = threadIdx.x + blockIdx.x * blockDim.x + 1;
 	int yi = threadIdx.y + blockIdx.y * blockDim.y + 1;
 	int zi = threadIdx.z + blockIdx.z * blockDim.z + 1;
-	if (xi > params.LX || yi > params.LY || zi > params.LZ) {
+	int LX = gp->LX;
+	int LY = gp->LY;
+	int LZ = gp->LZ;
+	if (xi > LX || yi > LY || zi > LZ) {
 		return;
 	}
 	double dun_norm = 0;
@@ -818,290 +856,14 @@ __global__ static void calUnnormD(double* un_norm, double* um_norm, double* vn_n
 		for (int j = 0; j < 2; j++) {
 #pragma unroll 
 			for (int k = 0; k < 2; k++) {
-				dun_norm += um_norm[get_index(xi - i, yi - j, zi - k, 1)];
-				dvn_norm += vm_norm[get_index(xi - i, yi - j, zi - k, 1)];
+				dun_norm += um_norm[get_index(xi - i, yi - j, zi - k, 1, LX, LY)];
+				dvn_norm += vm_norm[get_index(xi - i, yi - j, zi - k, 1, LX, LY)];
 			}
 		}
 	}
-	un_norm[get_index(xi, yi, zi, 2)] = dun_norm / 8;
-	vn_norm[get_index(xi, yi, zi, 2)] = dvn_norm / 8;
-}
-
-__global__ static void recordCenterElementD(double* vm_center, double* wm_center, double3* rm_center, double3* Fn_center, double3* Veln_center, double* vm, double* wm, double3* rn, double3* Fn, double3* Veln, int time)
-{
-	int gi = get_index(params.LX / 2, params.LY / 2, params.LZ / 2, 1);
-	int hi = get_index((params.LX + 1) / 2, (params.LY + 1) / 2, (params.LZ + 1) / 2, 2);
-	vm_center[time] = vm[gi];
-	wm_center[time] = wm[gi];
-	rm_center[time] = rn[hi];
-	Fn_center[time] = Fn[hi];
-	Veln_center[time] = Veln[hi];
-}
-
-__global__ static void calFilamentD(double* vn_norm, double* un_norm, double3* filament, int time, unsigned int* hitCnt)
-{
-	int xi = threadIdx.x + blockIdx.x * blockDim.x + 1;
-	int yi = threadIdx.y + blockIdx.y * blockDim.y + 1;
-	int zi = threadIdx.z + blockIdx.z * blockDim.z + 1;
-	if (xi > params.LX - 1 || yi > params.LY - 1 || zi > params.LZ - 1) {
-		return;
-	}
-	double Viso = 0.15;
-	// 读取 8 结点值
-	double u00 = un_norm[get_index(xi, yi, zi, 2)];
-	double u10 = un_norm[get_index(xi + 1, yi, zi, 2)];
-	double u01 = un_norm[get_index(xi, yi + 1, zi, 2)];
-	double u11 = un_norm[get_index(xi + 1, yi + 1, zi, 2)];
-	double v00 = vn_norm[get_index(xi, yi, zi, 2)];
-	double v10 = vn_norm[get_index(xi + 1, yi, zi, 2)];
-	double v01 = vn_norm[get_index(xi, yi + 1, zi, 2)];
-	double v11 = vn_norm[get_index(xi + 1, yi + 1, zi, 2)];
-
-	double xb, yb;
-	bool ok = solveBilinear(u00, u10, u01, u11, v00, v10, v01, v11, Viso, xb, yb);
-	if (ok) {
-		// 获得一个全局唯一的下标，并把计数器 +1
-		unsigned int gi = atomicAdd(hitCnt, 1u);
-		filament[time * params.maxFilamentlen + gi].x = xi + xb;
-		filament[time * params.maxFilamentlen + gi].y = yi + yb;
-		filament[time * params.maxFilamentlen + gi].z = zi;
-	}
-}
-
-__device__ static float delta4(float r) {
-	r = fabsf(r);
-	if (r <= 1.f) {
-		return 0.125f * (3.f - 2.f * r + sqrtf(1.f + 4.f * r - 4.f * r * r));
-	}
-	else if (r <= 2.f) {
-		return 0.125f * (5.f - 2.f * r - sqrtf(-7.f + 12.f * r - 4.f * r * r));
-	}
-	else {
-		return 0.f;
-	}
-}
-
-__device__ static int id3(int x, int y, int z, int Nx, int Ny) {
-	return x + y * Nx + z * Nx * Ny; 
-}
-
-__global__ static void k_set_force(float3* F) {
-	int i = blockDim.x * blockIdx.x + threadIdx.x; 
-	if (i < p.N) { 
-		F[i] = p.F_const; 
-	}
-}
-
-__global__ static void k_init(float* f, float* rho, float3* u) {
-	int i = blockDim.x * blockIdx.x + threadIdx.x; 
-	if (i >= p.N) 
-		return;
-	rho[i] = 1.f; 
-	u[i] = make_float3(0.f, 0.f, 0.f);
-#pragma unroll
-	for (int q = 0; q < 19; ++q) 
-		f[i + q * (size_t)p.N] = p.w[q];
-}
-
-__global__ static void k_macros(float* f, float* rho, float3* u, float3* F) {
-	int i = blockDim.x * blockIdx.x + threadIdx.x; 
-	if (i >= p.N) return;
-	float rh = 0.f;
-	float3 s = make_float3 (0.f, 0.f, 0.f);
-#pragma unroll
-	for (int q = 0; q < 19; ++q) {
-		float fi = f[i + q * (size_t)p.N];
-		rh += fi; 
-		s += fi * p.c[q];
-	}
-	rho[i] = rh;
-	u[i] = (s + 0.5f * F[i]) / rh;
-}
-
-__global__ static void k_zero(float3* a) {
-	int i = blockDim.x * blockIdx.x + threadIdx.x; 
-	if (i < p.N) 
-		a[i] = make_float3(0.f, 0.f, 0.f);
-}
-
-__global__ static void k_ibm_interpolate(float3* u, float3* Ul, float3* lag) {
-	int l = blockDim.x * blockIdx.x + threadIdx.x;
-	if (l >= p.M) return;
-
-	const float h = p.h;
-	const int Nx = p.L.x, Ny = p.L.y, Nz = p.L.z;
-
-	const float gx = lag[l].x / h;
-	const float gy = lag[l].y / h;
-	const float gz = lag[l].z / h;
-
-	const int ix = (int)floor(gx);
-	const int iy = (int)floor(gy);
-	const int iz = (int)floor(gz);
-
-	float3 ul = make_float3(0.0, 0.0, 0.0);
-	float wsum = 0.0;
-
-	for (int ii = max(0, ix - 1); ii <= min(Nx - 1, ix + 2); ++ii) {
-		const float phix = delta4(gx - (float)ii);
-		for (int jj = max(0, iy - 1); jj <= min(Ny - 1, iy + 2); ++jj) {
-			const float phiy = delta4(gy - (float)jj);
-			for (int kk = max(0, iz - 1); kk <= min(Nz - 1, iz + 2); ++kk) {
-				const float phiz = delta4(gz - (float)kk);
-				const float w = phix * phiy * phiz;
-				const int id = id3(ii, jj, kk, Nx, Ny);
-				ul += u[id] * w;
-				wsum += w;
-			}
-		}
-	}
-	Ul[l] = ul / wsum;
-}
-
-__global__ static void k_scale_negbeta(float3* Ul, float3* Vl, float3* Fl, float beta_eff) {
-	int l = blockDim.x * blockIdx.x + threadIdx.x; 
-	if (l >= p.M) return;
-	//Fl[l] = p.beta * (Vl[l] - Ul[l]);
-	Fl[l] = beta_eff * (Vl[l] - Ul[l]);
-	//if (l == 1) {
-	//	printf("%f, %f\n", Fl[l].x, Fl[l].y);
+	un_norm[get_index(xi, yi, zi, 2, LX, LY)] = dun_norm / 8;
+	vn_norm[get_index(xi, yi, zi, 2, LX, LY)] = dvn_norm / 8;
+	//if (xi == 1 && yi == 1 && zi == 1) {
+	//	printf("%f, %f\n", un_norm[get_index(xi, yi, zi, 2, LX, LY)], vn_norm[get_index(xi, yi, zi, 2, LX, LY)]);
 	//}
-}
-
-__global__ static void k_add_reaction_to_gel(int* bIndex, double3* Fn, float3* Fl)
-{
-	int l = blockDim.x * blockIdx.x + threadIdx.x;
-	if (l >= p.M) return;
-
-	int id = bIndex[l];
-	float3 f = Fl[l];
-
-	Fn[id].x = -(double)f.x;
-	Fn[id].y = -(double)f.y;
-	Fn[id].z = -(double)f.z;
-	//if (l == 0) {
-	//	printf("%f, %f， %f\n", Fl[l].x, Fl[l].y, Fl[l].z);
-	//}
-}
-
-__global__ static void k_ibm_spread(float3* Fl, float3* lag, float3* F_ibm, float* dA) {
-	int l = blockDim.x * blockIdx.x + threadIdx.x;
-	if (l >= p.M) return;
-
-	const float h = p.h; 
-	const int Nx = p.L.x, Ny = p.L.y, Nz = p.L.z;
-
-	const float gx = lag[l].x / h;
-	const float gy = lag[l].y / h;
-	const float gz = lag[l].z / h;
-
-	const int ix = (int)floor(gx);
-	const int iy = (int)floor(gy);
-	const int iz = (int)floor(gz);
-
-	const float3 fL = Fl[l];
-
-	float wsum = 0.0;
-	for (int ii = max(0, ix - 1); ii <= min(Nx - 1, ix + 2); ++ii) {
-		const float phix = delta4(gx - (float)ii);
-		for (int jj = max(0, iy - 1); jj <= min(Ny - 1, iy + 2); ++jj) {
-			const float phiy = delta4(gy - (float)jj);
-			for (int kk = max(0, iz - 1); kk <= min(Nz - 1, iz + 2); ++kk) {
-				const float phiz = delta4(gz - (float)kk);
-				wsum += phix * phiy * phiz;
-			}
-		}
-	}
-	if (wsum == 0.0) return;
-
-	// δ_h = (1/h^3) φ(·/h)  → 扩散时需要乘 1/h^3
-	// scale 还乘 dA[l]，并做近壁面 wsum 归一化，保证 ∑_grid F_ibm * h^3 ≈ ∑_l Fl * dA_l
-	const float inv_h3 = 1.0 / (h * h * h);
-	const float scale = 1 * inv_h3 / wsum;
-
-	for (int ii = max(0, ix - 1); ii <= min(Nx - 1, ix + 2); ++ii) {
-		const float phix = delta4(gx - (float)ii);
-		for (int jj = max(0, iy - 1); jj <= min(Ny - 1, iy + 2); ++jj) {
-			const float phiy = delta4(gy - (float)jj);
-			for (int kk = max(0, iz - 1); kk <= min(Nz - 1, iz + 2); ++kk) {
-				const float phiz = delta4(gz - (float)kk);
-				const float w = phix * phiy * phiz * scale;
-				const int id = id3(ii, jj, kk, Nx, Ny);
-				atomicAdd(&F_ibm[id].x, fL.x * w);
-				atomicAdd(&F_ibm[id].y, fL.y * w);
-				atomicAdd(&F_ibm[id].z, fL.z * w);
-			}
-		}
-	}
-}
-
-__global__ static void k_collide(float* f, float* fpost, float* rho, float3* u, float3* F) {
-	int i = blockDim.x * blockIdx.x + threadIdx.x;
-	if (i >= p.N) return;
-	float rh = rho[i];
-	float inv_tau = 1.f / p.tau;
-	float uu = u[i] * u[i];
-#pragma unroll
-	for (int q = 0; q < 19; ++q) {
-		int3 c = p.c[q];
-		float cu = c * u[i];
-		float feq = p.w[q] * rh * (1.f + (cu / p.cs2) + 0.5f * (cu * cu) / (p.cs2 * p.cs2) - 0.5f * (uu / p.cs2));
-		float ciF = c * F[i];
-		float uF = u[i] * F[i];
-		float Fterm = p.w[q] * (1.f - 0.5f * inv_tau) * ((ciF / p.cs2) + (cu * ciF) / (p.cs2 * p.cs2) - (uF / p.cs2));
-		float fi = f[i + q * (size_t)p.N];
-		fpost[i + q * (size_t)p.N] = fi - inv_tau * (fi - feq) + Fterm;
-	}
-}
-
-__global__ static void k_stream_bounce(float* fpost, float* fnext) {
-	int i = blockDim.x * blockIdx.x + threadIdx.x;
-	int N = p.N; if (i >= N) return;
-	const int Nx = p.L.x, Ny = p.L.y, Nz = p.L.z;
-	int tmp = i / Nx;
-	int3 r = make_int3(i % Nx, tmp % Ny, tmp / Ny);
-#pragma unroll
-	for (int q = 0; q < 19; ++q) {
-		int3 rn = r + p.c[q];
-		bool inside = (0 <= rn.x && rn.x < Nx &&
-			0 <= rn.y && rn.y < Ny &&
-			0 <= rn.z && rn.z < Nz);
-		if (inside) {
-			int idn = id3(rn.x, rn.y, rn.z, Nx, Ny);
-			fnext[idn + q * (size_t)N] = fpost[i + q * (size_t)N];
-		}
-		else {
-			int qo = p.opp[q];
-			fnext[i + qo * (size_t)N] = fpost[i + q * (size_t)N];
-		}
-	}
-}
-
-__global__ static void k_vec_add(float3* A, float3* B, float3* C) {
-	int i = blockDim.x * blockIdx.x + threadIdx.x; 
-	if (i < p.N) 
-		C[i] = A[i] + B[i];
-}
-
-// 推荐的窄化工具（最近偶数舍入）
-__device__ __forceinline__ float3 to_float3(const double3 a) {
-	return make_float3(__double2float_rn(a.x),
-		__double2float_rn(a.y),
-		__double2float_rn(a.z));
-}
-
-// 你的 kernel：double3 → float3 显式转换
-__global__ static void k_gather_boundary(int* bIndex, double3* rn, double3* vn, float3* lag, float3* Vl)
-{
-	int l = blockDim.x * blockIdx.x + threadIdx.x;
-	if (l >= p.M) return;
-
-	int id = bIndex[l];
-
-	// 读一次寄存器，再转换
-	const double3 r = rn[id];
-	const double3 v = vn[id];
-
-	lag[l] = to_float3(r);
-	Vl[l] = to_float3(v);
 }
