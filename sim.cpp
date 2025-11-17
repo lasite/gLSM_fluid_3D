@@ -34,9 +34,10 @@ int main(int argc, char** argv)
 
     for (long long int solverIterations = 0; solverIterations <= runstep; ++solverIterations)
     {
-        for (auto g : gels)
+        for (auto g : gels) {
             g->update(solverIterations);
-        cudaDeviceSynchronize();
+            cudaStreamSynchronize(g->stream());
+        }
         coupler->packFromGels();
         //for (int kk = 0; kk < fluid->Nsub; kk++) {
         //    coupler->update(solverIterations);

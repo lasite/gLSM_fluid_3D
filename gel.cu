@@ -506,11 +506,16 @@ Gel::~Gel()
 
 void Gel::_initialize(int time)
 {
-	allocateHostStorage();
-	allocateDeviceStorage();
-	cudaStreamCreate(&m_gel_stream);
-	setInitValue();
-	copyDataToDevice();
+        allocateHostStorage();
+        allocateDeviceStorage();
+        cudaStreamCreate(&m_gel_stream);
+        setInitValue();
+        copyDataToDevice();
+}
+
+cudaStream_t Gel::stream() const
+{
+        return m_gel_stream;
 }
 
 void Gel::update(long long int solverIterations)
