@@ -77,8 +77,10 @@ Coupler::Coupler(std::vector<Gel*>& gels, Fluid* fluid) :
 void Coupler::packFromGels() {
     for (int i = 0; i < numGels; ++i) {
         const int off = h_offsets[i];
-        // 1. 先启动 kernel（没有返回值）
-        k_gather_boundary << <blocksM, threads, 0, coupler_stream >> > (
+        const int Mi = gels[i]->m_boundaryCount;
+        const int blocks = (Mi + threads - 1) / threads;
+        // 1.  kernel没蟹值
+        k_gather_boundary << <blocks, threads, 0, coupler_stream >> > (
             gels[i]->m_dbIndex,
             gels[i]->m_drn,
             gels[i]->m_dVels,
@@ -86,14 +88,14 @@ void Coupler::packFromGels() {
             d_lag_all_ + off,
             d_Vl_all_ + off,
             d_Cl_all_ + off,
-            d_cp);
+            Mi);
 
-        // 2. 然后用 cudaGetLastError() 取启动是否出错
+        // 2. 然 cudaGetLastError() 取欠
         //cudaError_t err = cudaGetLastError();
         //if (err != cudaSuccess) {
         //    fprintf(stderr, "k_gather_boundary launch failed: %s\n",
         //        cudaGetErrorString(err));
-        //    // return; 或者 std::abort();
+        //    // return;  std::abort();
         //}
 
     }
@@ -103,7 +105,8 @@ void Coupler::scatterToGels() {
     for (int i = 0; i < numGels; ++i) {
         const int Mi = gels[i]->m_boundaryCount;
         const int off = h_offsets[i];
-        k_add_reaction_to_gel << <blocksM, threads, 0, coupler_stream >> > (gels[i]->m_dbIndex, gels[i]->m_dFn, gels[i]->m_dun_norm, d_Vl_all_ + off, d_Cl_all_ + off, d_cp);
+        const int blocks = (Mi + threads - 1) / threads;
+        k_add_reaction_to_gel << <blocks, threads, 0, coupler_stream >> > (gels[i]->m_dbIndex, gels[i]->m_dFn, gels[i]->m_dun_norm, d_Vl_all_ + off, d_Cl_all_ + off, Mi);
     }
 }
 
