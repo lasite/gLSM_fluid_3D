@@ -101,10 +101,10 @@ __global__ void k_scale_negbeta(float3* Ul, float3* Vl, float3* Fl, float beta_e
 	//}
 }
 
-__global__ void k_add_reaction_to_gel(int* bIndex, double3* Fn, double* un_norm, float3* Fl, float* Cl, CouplerParams* cp)
+__global__ void k_add_reaction_to_gel(int* bIndex, double3* Fn, double* un_norm, float3* Fl, float* Cl, int M)
 {
 	int l = blockDim.x * blockIdx.x + threadIdx.x;
-	if (l >= cp->M) return;
+	if (l >= M) return;
 
 	int id = bIndex[l];
 	float3 f = Fl[l];
@@ -178,10 +178,11 @@ __device__ __forceinline__ float3 to_float3(const double3 a) {
 		__double2float_rn(a.z));
 }
 
-__global__ void k_gather_boundary(int* bIndex, double3* rn, double3* vn, double* un_norm, float3* lag, float3* Vl, float* Cl, CouplerParams* cp)
+__global__ void k_gather_boundary(int* bIndex, double3* rn, double3* vn, double* un_norm,
+    float3* lag, float3* Vl, float* Cl, int M)
 {
-	int l = blockDim.x * blockIdx.x + threadIdx.x;
-	if (l >= cp->M) return;
+        int l = blockDim.x * blockIdx.x + threadIdx.x;
+        if (l >= M) return;
 
 	int id = bIndex[l];
 
@@ -192,11 +193,11 @@ __global__ void k_gather_boundary(int* bIndex, double3* rn, double3* vn, double*
 	lag[l] = to_float3(r);
 	Vl[l] = to_float3(v);
 	Cl[l] = __double2float_rn(u);
-	if (l == 0) {
-		printf("%f, %f, %f\n", r.x, r.y, r.z);
-		printf("%f, %f, %f\n", v.x, v.y, v.z);
-		printf("%f\n", u);
-	}
+        //if (l == 0) {
+        //      printf("%f, %f, %f\n", r.x, r.y, r.z);
+        //      printf("%f, %f, %f\n", v.x, v.y, v.z);
+        //      printf("%f\n", u);
+        //}
 }
 
 __device__ __forceinline__ void atomicAdd_float3(float3* p, const float3 v) {
