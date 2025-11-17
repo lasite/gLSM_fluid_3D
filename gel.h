@@ -22,7 +22,9 @@ public:
     void _initialize(int time);
     void update(long long int solverIterations);
     void _finalize();
-	void writeFiles(double time);
+        void writeFiles(double time);
+
+    cudaStream_t stream() const;
 
 public:
     void allocateHostStorage();
