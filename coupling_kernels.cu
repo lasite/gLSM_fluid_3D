@@ -100,8 +100,8 @@ __global__ void k_scale_negbeta(float3* Ul, float3* Vl, float3* Fl, float beta_e
 	//Fl[l] = cp->beta * (Vl[l] - Ul[l]);
 	Fl[l] = beta_eff * (Vl[l] - Ul[l]);
 	//if (l == 1) {
-	//	printf("%f, %f\n", Vl[l].x, Vl[l].y);
-	//	printf("%f, %f\n", Ul[l].x, Ul[l].y);
+	//	printf("%12f, %12f\n", Vl[l].x, Vl[l].y);
+	//	printf("%12f, %12f\n", Fl[l].x, Fl[l].y);
 	//}
 }
 

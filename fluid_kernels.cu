@@ -94,9 +94,9 @@ __global__  void k_init(float* f, float* rho, float3* u, float* c1, float* c2, F
 #pragma unroll
 	for (int q = 0; q < 19; ++q) {
 		f[i + q * (size_t)fp->N] = fp->w[q];
-		if (i == 0) {
-			printf("%f\n", fp->w[q]);
-		}
+		//if (i == 0) {
+		//	printf("%f\n", fp->w[q]);
+		//}
 	}
 }
 
@@ -117,7 +117,7 @@ __global__  void k_macros(float* f, float* rho, float3* u, float3* F, FluidParam
 	rho[i] = rh;
 	u[i] = (s + 0.5f * F[i]) / rh;
 	//if (i == 100) {
-	//	printf("%f, %f, %f\n", s.x, s.y, rh);
+	//	printf("%f, %f, %f, %f\n", u[i].x, u[i].y, u[i].z, rho[i]);
 	//}
 }
 
@@ -248,4 +248,7 @@ __global__ void k_convection_diffusion(float3* d_u, float* d_c1, float* d_c2, Fl
 	const float diff = fp->D * dot3(sec, inv_h2);
 
 	d_c2[idx] = c + fp->dt * (conv + diff);
+	//if (i == 100) {
+	//	printf("%f\n", d_c2[idx]);
+	//}
 }

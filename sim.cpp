@@ -39,12 +39,12 @@ int main(int argc, char** argv)
             cudaStreamSynchronize(g->stream());
         }
         coupler->packFromGels();
-        /*for (int kk = 0; kk < fluid->Nsub; kk++) {*/
-        for (int kk = 0; kk < 1; kk++) {
+        for (int kk = 0; kk < fluid->Nsub; kk++) {
+        //for (int kk = 0; kk < 1; kk++) {
             coupler->update(solverIterations);
             fluid->update(solverIterations);
         }
-        //fluid->convectionAndDiffusion();
+        fluid->convectionAndDiffusion();
         //coupler->applyGelRepulsion();
         //coupler->scatterToGels();
     }

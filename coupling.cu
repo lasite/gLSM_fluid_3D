@@ -68,7 +68,7 @@ Coupler::Coupler(std::vector<Gel*>& gels, Fluid* fluid) :
     h_cp->h = fluid->h_fp->h;
     h_cp->L = fluid->h_fp->L;
     h_cp->M = sumGelBoundaryCount;
-    h_cp->beta = 0.01;
+    h_cp->beta = 0.1;
     h_cp->delta = 1e-4;
     h_cp->gamma = 1.5;
     _initialize();
@@ -120,7 +120,7 @@ void Coupler::_initialize()
 
 void Coupler::update(long long int solverIterations)
 {
-    float ramp = fmin(1, (solverIterations + 1) / 20000.0);
+    float ramp = fmin(1, (solverIterations + 1) / 2000.0);
     float beta_eff = h_cp->beta * ramp;
     k_ibm_interpolate << <blocksM, threads, 0, coupler_stream >> > (fluid->d_u, fluid->d_c1, d_Ul_all_, d_Dl_all_, d_lag_all_, d_cp);
     k_scale_negbeta << <blocksM, threads, 0, coupler_stream >> > (d_Ul_all_, d_Vl_all_, d_Fl_all_, beta_eff, d_cp);
