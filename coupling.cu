@@ -95,9 +95,11 @@ void Coupler::packFromGels() {
 
         gels[i]->markBoundaryClean();
     }
+    cudaEventRecord(pack_complete_event, coupler_stream);
 }
 
 void Coupler::scatterToGels() {
+    cudaStreamWaitEvent(coupler_stream, ibm_complete_event, 0);
     for (int i = 0; i < numGels; ++i) {
         const int Mi = gels[i]->m_boundaryCount;
         const int off = h_offsets[i];
@@ -113,6 +115,7 @@ void Coupler::scatterToGels() {
 }
 
 void Coupler::applyGelRepulsion() {
+    cudaStreamWaitEvent(coupler_stream, ibm_complete_event, 0);
     k_gel_repulsion << <blocksM, threads, 0, coupler_stream >> > (d_lag_all_, d_owner, d_Fl_all_, d_cp);
 }
 
@@ -121,6 +124,8 @@ void Coupler::_initialize()
     allocateHostStorage();
     allocateDeviceStorage();
     cudaStreamCreate(&coupler_stream);
+    cudaEventCreateWithFlags(&pack_complete_event, cudaEventDisableTiming);
+    cudaEventCreateWithFlags(&ibm_complete_event, cudaEventDisableTiming);
     setInitValue();
     copyDataToDevice();
 }
@@ -130,10 +135,12 @@ void Coupler::update(long long int solverIterations)
     float ramp = fmin(1, (solverIterations + 1) / 2000.0);
     float beta_eff = h_cp->beta * ramp;
     cudaStream_t fluid_stream = fluid->stream();
+    cudaStreamWaitEvent(fluid_stream, pack_complete_event, 0);
     k_ibm_interpolate << <blocksM, threads, 0, fluid_stream >> > (fluid->d_u, fluid->d_c1, d_Ul_all_, d_Dl_all_, d_lag_all_, d_cp);
     k_scale_negbeta << <blocksM, threads, 0, fluid_stream >> > (d_Ul_all_, d_Vl_all_, d_Fl_all_, beta_eff, d_cp);
     std::swap(d_Cl_all_, d_Dl_all_);
     k_ibm_spread << <blocksM, threads, 0, fluid_stream >> > (fluid->d_F_ibm, fluid->d_c1, d_Fl_all_, d_Dl_all_, d_lag_all_, d_A, d_cp);
+    cudaEventRecord(ibm_complete_event, fluid_stream);
 }
 
 void Coupler::freeHostMemory()
@@ -154,6 +161,8 @@ void Coupler::freeDeviceMemory()
 
 void Coupler::_finalize()
 {
+    cudaEventDestroy(pack_complete_event);
+    cudaEventDestroy(ibm_complete_event);
     cudaStreamDestroy(coupler_stream);
     freeDeviceMemory();
 }
