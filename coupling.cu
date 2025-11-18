@@ -76,6 +76,9 @@ Coupler::Coupler(std::vector<Gel*>& gels, Fluid* fluid) :
 
 void Coupler::packFromGels() {
     for (int i = 0; i < numGels; ++i) {
+        if (!gels[i]->boundaryDirty()) {
+            continue;
+        }
         const int off = h_offsets[i];
         const int Mi = gels[i]->m_boundaryCount;
         const int blocks = (Mi + threads - 1) / threads;
@@ -89,6 +92,8 @@ void Coupler::packFromGels() {
             d_Vl_all_ + off,
             d_Cl_all_ + off,
             Mi);
+
+        gels[i]->markBoundaryClean();
 
         // 2. Ȼ cudaGetLastError() ȡǷ
         //cudaError_t err = cudaGetLastError();
