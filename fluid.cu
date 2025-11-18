@@ -164,11 +164,11 @@ Fluid::~Fluid()
 
 void Fluid::_initialize(int time)
 {
-	allocateHostStorage();
-	allocateDeviceStorage();
-	cudaStreamCreate(&fluid_stream);
-	setInitValue();
-	copyDataToDevice();
+allocateHostStorage();
+allocateDeviceStorage();
+cudaStreamCreate(&fluid_stream);
+copyDataToDevice();
+setInitValue();
 }
 
 void Fluid::convectionAndDiffusion()
