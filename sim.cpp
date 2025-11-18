@@ -36,7 +36,7 @@ int main(int argc, char** argv)
     {
         for (auto g : gels) {
             g->update(solverIterations);
-            cudaStreamSynchronize(g->stream());
+            g->recordUpdateCompleteEvent();
         }
         coupler->packFromGels();
         for (int kk = 0; kk < fluid->Nsub; kk++) {
