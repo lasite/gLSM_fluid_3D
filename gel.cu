@@ -513,6 +513,7 @@ void Gel::_initialize(int time)
         allocateHostStorage();
         allocateDeviceStorage();
         cudaStreamCreate(&m_gel_stream);
+        cudaEventCreateWithFlags(&m_update_complete_event, cudaEventDisableTiming);
         setInitValue();
         copyDataToDevice();
         m_boundaryDirty = true;
@@ -521,6 +522,16 @@ void Gel::_initialize(int time)
 cudaStream_t Gel::stream() const
 {
         return m_gel_stream;
+}
+
+void Gel::recordUpdateCompleteEvent()
+{
+        cudaEventRecord(m_update_complete_event, m_gel_stream);
+}
+
+cudaEvent_t Gel::updateCompleteEvent() const
+{
+        return m_update_complete_event;
 }
 
 bool Gel::boundaryDirty() const
@@ -559,10 +570,11 @@ void Gel::update(long long int solverIterations)
 
 void Gel::_finalize()
 {
-	cudaStreamDestroy(m_gel_stream);
-	if (m_file_writer_thread.joinable()) {
-		m_file_writer_thread.join();
-	}
+        cudaEventDestroy(m_update_complete_event);
+        cudaStreamDestroy(m_gel_stream);
+        if (m_file_writer_thread.joinable()) {
+                m_file_writer_thread.join();
+        }
 	freeHostMemory();
 	freeDeviceMemory();
 }

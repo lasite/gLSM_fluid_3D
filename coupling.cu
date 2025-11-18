@@ -82,6 +82,7 @@ void Coupler::packFromGels() {
         const int off = h_offsets[i];
         const int Mi = gels[i]->m_boundaryCount;
         const int blocks = (Mi + threads - 1) / threads;
+        cudaStreamWaitEvent(coupler_stream, gels[i]->updateCompleteEvent(), 0);
         k_gather_boundary << <blocks, threads, 0, coupler_stream >> > (
             gels[i]->m_dbIndex,
             gels[i]->m_drn,
@@ -122,10 +123,11 @@ void Coupler::update(long long int solverIterations)
 {
     float ramp = fmin(1, (solverIterations + 1) / 2000.0);
     float beta_eff = h_cp->beta * ramp;
-    k_ibm_interpolate << <blocksM, threads, 0, coupler_stream >> > (fluid->d_u, fluid->d_c1, d_Ul_all_, d_Dl_all_, d_lag_all_, d_cp);
-    k_scale_negbeta << <blocksM, threads, 0, coupler_stream >> > (d_Ul_all_, d_Vl_all_, d_Fl_all_, beta_eff, d_cp);
+    cudaStream_t fluid_stream = fluid->stream();
+    k_ibm_interpolate << <blocksM, threads, 0, fluid_stream >> > (fluid->d_u, fluid->d_c1, d_Ul_all_, d_Dl_all_, d_lag_all_, d_cp);
+    k_scale_negbeta << <blocksM, threads, 0, fluid_stream >> > (d_Ul_all_, d_Vl_all_, d_Fl_all_, beta_eff, d_cp);
     std::swap(d_Cl_all_, d_Dl_all_);
-    k_ibm_spread << <blocksM, threads, 0, coupler_stream >> > (fluid->d_F_ibm, fluid->d_c1, d_Fl_all_, d_Dl_all_, d_lag_all_, d_A, d_cp);
+    k_ibm_spread << <blocksM, threads, 0, fluid_stream >> > (fluid->d_F_ibm, fluid->d_c1, d_Fl_all_, d_Dl_all_, d_lag_all_, d_A, d_cp);
 }
 
 void Coupler::freeHostMemory()

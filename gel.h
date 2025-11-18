@@ -25,6 +25,8 @@ public:
         void writeFiles(double time);
 
     cudaStream_t stream() const;
+    void recordUpdateCompleteEvent();
+    cudaEvent_t updateCompleteEvent() const;
     bool boundaryDirty() const;
     void markBoundaryClean();
 
@@ -120,8 +122,9 @@ public:
 	int m_numGelNodes;
 	int m_boundaryCount;
 	std::thread m_file_writer_thread;
-	cudaStream_t m_gel_stream;
-	dim3 m_blockDim;
+        cudaStream_t m_gel_stream;
+        cudaEvent_t m_update_complete_event;
+        dim3 m_blockDim;
 	dim3 m_gridDim_1;
 	dim3 m_gridDim0;
 	dim3 m_gridDim1;

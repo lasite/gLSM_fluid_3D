@@ -171,10 +171,15 @@ copyDataToDevice();
 setInitValue();
 }
 
+cudaStream_t Fluid::stream() const
+{
+        return fluid_stream;
+}
+
 void Fluid::convectionAndDiffusion()
 {
-	k_convection_diffusion << <blocksN, threads, 0, fluid_stream >> > (d_u, d_c1, d_c2, d_fp);
-	swap(d_c1, d_c2);
+        k_convection_diffusion << <blocksN, threads, 0, fluid_stream >> > (d_u, d_c1, d_c2, d_fp);
+        swap(d_c1, d_c2);
 }
 
 void Fluid::update(long long int solverIterations)

@@ -28,6 +28,7 @@ public:
     void _finalize();
     void writeFiles(double time);
     void convectionAndDiffusion();
+    cudaStream_t stream() const;
 protected:
     void allocateHostStorage();
     void allocateDeviceStorage();
