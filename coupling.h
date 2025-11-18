@@ -56,7 +56,9 @@ public:
 	double dt = 1e-3;
 	int numGels;
 	int sumGelBoundaryCount;
-	cudaStream_t coupler_stream;
+        cudaStream_t coupler_stream;
+        cudaEvent_t pack_complete_event;
+        cudaEvent_t ibm_complete_event;
 	int threads;
 	int blocksM;
 	std::vector<Gel*>& gels;
