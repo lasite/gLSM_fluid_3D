@@ -6,7 +6,7 @@
 
 using namespace std;
 
-#define runstep 10
+#define runstep 0
 
 int main(int argc, char** argv)
 {
@@ -39,10 +39,11 @@ int main(int argc, char** argv)
             cudaStreamSynchronize(g->stream());
         }
         coupler->packFromGels();
-        //for (int kk = 0; kk < fluid->Nsub; kk++) {
-        //    coupler->update(solverIterations);
-        //    fluid->update(solverIterations);
-        //}
+        /*for (int kk = 0; kk < fluid->Nsub; kk++) {*/
+        for (int kk = 0; kk < 1; kk++) {
+            coupler->update(solverIterations);
+            fluid->update(solverIterations);
+        }
         //fluid->convectionAndDiffusion();
         //coupler->applyGelRepulsion();
         //coupler->scatterToGels();

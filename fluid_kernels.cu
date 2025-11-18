@@ -78,6 +78,9 @@ __global__  void k_set_force(float3* F, FluidParams* fp) {
 	if (i < fp->N) {
 		F[i] = fp->F_const;
 	}
+	//if (i == 100) {
+	//	printf("%f, %f, %f\n", F[i].x, F[i].y, F[i].z);
+	//}
 }
 
 __global__  void k_init(float* f, float* rho, float3* u, float* c1, float* c2, FluidParams* fp) {
@@ -89,8 +92,12 @@ __global__  void k_init(float* f, float* rho, float3* u, float* c1, float* c2, F
 	c1[i] = 0.f;
 	c2[i] = 0.f;
 #pragma unroll
-	for (int q = 0; q < 19; ++q)
+	for (int q = 0; q < 19; ++q) {
 		f[i + q * (size_t)fp->N] = fp->w[q];
+		if (i == 0) {
+			printf("%f\n", fp->w[q]);
+		}
+	}
 }
 
 __global__  void k_macros(float* f, float* rho, float3* u, float3* F, FluidParams* fp) {
@@ -103,9 +110,15 @@ __global__  void k_macros(float* f, float* rho, float3* u, float3* F, FluidParam
 		float fi = f[i + q * (size_t)fp->N];
 		rh += fi;
 		s += fi * fp->c[q];
+		//if (i == 100) {
+		//	printf("%d, %d, %d, %f\n", fp->c[q].x, fp->c[q].y, fp->c[q].z, fi);
+		//}
 	}
 	rho[i] = rh;
 	u[i] = (s + 0.5f * F[i]) / rh;
+	//if (i == 100) {
+	//	printf("%f, %f, %f\n", s.x, s.y, rh);
+	//}
 }
 
 __global__  void k_zero(float3* a, FluidParams* fp) {
@@ -160,6 +173,9 @@ __global__  void k_vec_add(float3* A, float3* B, float3* C, FluidParams* fp) {
 	int i = blockDim.x * blockIdx.x + threadIdx.x;
 	if (i < fp->N)
 		C[i] = A[i] + B[i];
+	//if (i == 100) {
+	//	printf("%f, %f, %f\n", C[i].x, C[i].y, C[i].z);
+	//}
 }
 
 __device__ __forceinline__ float dot3(const float3 a, const float3 b) {

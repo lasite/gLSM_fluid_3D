@@ -89,6 +89,9 @@ __global__ void k_ibm_interpolate(float3* u, float* c, float3* Ul, float* Cl, fl
 	}
 	Ul[l] = ul / wsum;
 	Cl[l] = cl / wsum;
+	//if (l == 0) {
+	//	printf("%f, %f\n", Ul[l], Cl[l]);
+	//}
 }
 
 __global__ void k_scale_negbeta(float3* Ul, float3* Vl, float3* Fl, float beta_eff, CouplerParams* cp) {
@@ -97,7 +100,8 @@ __global__ void k_scale_negbeta(float3* Ul, float3* Vl, float3* Fl, float beta_e
 	//Fl[l] = cp->beta * (Vl[l] - Ul[l]);
 	Fl[l] = beta_eff * (Vl[l] - Ul[l]);
 	//if (l == 1) {
-	//	printf("%f, %f\n", Fl[l].x, Fl[l].y);
+	//	printf("%f, %f\n", Vl[l].x, Vl[l].y);
+	//	printf("%f, %f\n", Ul[l].x, Ul[l].y);
 	//}
 }
 
@@ -167,9 +171,13 @@ __global__ void k_ibm_spread(float3* F_ibm, float* c, float3* Fl, float* Dl, flo
 				atomicAdd(&F_ibm[id].y, fL.y * w);
 				atomicAdd(&F_ibm[id].z, fL.z * w);
 				atomicAdd(&c[id], dL * w);
+				//if (l == 0) {
+				//	printf("%f, %f, %f, %f\n", F_ibm[id].x, F_ibm[id].y, F_ibm[id].z, c[id]);
+				//}
 			}
 		}
 	}
+
 }
 
 __device__ __forceinline__ float3 to_float3(const double3 a) {
@@ -193,11 +201,11 @@ __global__ void k_gather_boundary(int* bIndex, double3* rn, double3* vn, double*
 	lag[l] = to_float3(r);
 	Vl[l] = to_float3(v);
 	Cl[l] = __double2float_rn(u);
-        //if (l == 0) {
-        //      printf("%f, %f, %f\n", r.x, r.y, r.z);
-        //      printf("%f, %f, %f\n", v.x, v.y, v.z);
-        //      printf("%f\n", u);
-        //}
+	//if (l == 0) {
+	//	printf("%f, %f, %f\n", r.x, r.y, r.z);
+	//	printf("%f, %f, %f\n", v.x, v.y, v.z);
+	//	printf("%f\n", u);
+	//}
 }
 
 __device__ __forceinline__ void atomicAdd_float3(float3* p, const float3 v) {

@@ -536,16 +536,16 @@ void Gel::markBoundaryClean()
 void Gel::update(long long int solverIterations)
 {
 	double time = solverIterations * m_dt;
-        if (solverIterations % 5 == 0) {
-                calServiceNodesPositionD << < m_gridDim2, m_blockDim, 0, m_gel_stream >> > (m_drn, m_dmap_node, m_dgp);
-		calElementPropertiesD << <m_gridDim1, m_blockDim, 0, m_gel_stream >> > (m_drn, m_drm, m_drm_loc, m_dnmSm, m_dVolm, m_dwm, m_dwmp, m_dgp);
-		calPressureD << < m_gridDim_1, m_blockDim, 0, m_gel_stream >> > (m_dPrem, m_dvm, m_dwm, m_dgp);
-		calNodesVelocityD << < m_gridDim0, m_blockDim, 0, m_gel_stream >> > (m_drn, m_dVeln, m_dVels, m_dFn, m_dnmSm, m_dPrem, m_dwm, m_dgp);
-		calInternalNodesPositionD << < m_gridDim0, m_blockDim, 0, m_gel_stream >> > (m_drn, m_dVeln, m_dgp);
-		calChemBoundaryD << < m_gridDim1, m_blockDim, 0, m_gel_stream >> > (m_dum, m_dum_norm, m_dvm, m_dvm_norm, m_dwm, m_dmap_element, time, m_dgp);
-                calUnnormD << < m_gridDim0, m_blockDim, 0, m_gel_stream >> > (m_dun_norm, m_dum_norm, m_dvn_norm, m_dvm_norm, m_dgp);
-                calTermsD << < m_gridDim_1, m_blockDim, 0, m_gel_stream >> > (m_dT0m, m_dT1m, m_dT2m, m_dwm, m_dwmp, m_dVeln, m_dnmSm, m_dVolm, m_drm_loc, m_dun_norm, m_dum_norm, m_drm, m_dgp);
-                m_boundaryDirty = true;
+        if (solverIterations % 1 == 0) {
+			calServiceNodesPositionD << < m_gridDim2, m_blockDim, 0, m_gel_stream >> > (m_drn, m_dmap_node, m_dgp);
+			calElementPropertiesD << <m_gridDim1, m_blockDim, 0, m_gel_stream >> > (m_drn, m_drm, m_drm_loc, m_dnmSm, m_dVolm, m_dwm, m_dwmp, m_dgp);
+			calPressureD << < m_gridDim_1, m_blockDim, 0, m_gel_stream >> > (m_dPrem, m_dvm, m_dwm, m_dgp);
+			calNodesVelocityD << < m_gridDim0, m_blockDim, 0, m_gel_stream >> > (m_drn, m_dVeln, m_dVels, m_dFn, m_dnmSm, m_dPrem, m_dwm, m_dgp);
+			calInternalNodesPositionD << < m_gridDim0, m_blockDim, 0, m_gel_stream >> > (m_drn, m_dVeln, m_dgp);
+			calChemBoundaryD << < m_gridDim1, m_blockDim, 0, m_gel_stream >> > (m_dum, m_dum_norm, m_dvm, m_dvm_norm, m_dwm, m_dmap_element, time, m_dgp);
+			calUnnormD << < m_gridDim0, m_blockDim, 0, m_gel_stream >> > (m_dun_norm, m_dum_norm, m_dvn_norm, m_dvm_norm, m_dgp);
+			calTermsD << < m_gridDim_1, m_blockDim, 0, m_gel_stream >> > (m_dT0m, m_dT1m, m_dT2m, m_dwm, m_dwmp, m_dVeln, m_dnmSm, m_dVolm, m_drm_loc, m_dun_norm, m_dum_norm, m_drm, m_dgp);
+			m_boundaryDirty = true;
         }
 	calChemD << < m_gridDim_1, m_blockDim, 0, m_gel_stream >> > (m_dvm, m_dum, m_dwm, m_dT0m, m_dT1m, m_dT2m, m_drm, time, m_dgp);
 	if (solverIterations % 1000 == 0) {
