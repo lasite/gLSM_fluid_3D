@@ -217,7 +217,7 @@ __device__ __forceinline__ void atomicAdd_float3(float3* p, const float3 v) {
 __global__ void k_gel_repulsion(float3* lag, int* owner, float3* Fl, CouplerParams* cp)
 {
     const int a = blockDim.x * blockIdx.x + threadIdx.x;
-    if (cp->M) return;
+    if (a >= cp->M) return;
 
     const int oa = owner[a];
     const float3 xa = make_float3((double)lag[a].x,

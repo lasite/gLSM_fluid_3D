@@ -102,7 +102,13 @@ void Coupler::scatterToGels() {
         const int Mi = gels[i]->m_boundaryCount;
         const int off = h_offsets[i];
         const int blocks = (Mi + threads - 1) / threads;
-        k_add_reaction_to_gel << <blocks, threads, 0, coupler_stream >> > (gels[i]->m_dbIndex, gels[i]->m_dFn, gels[i]->m_dun_norm, d_Vl_all_ + off, d_Cl_all_ + off, Mi);
+        k_add_reaction_to_gel<<<blocks, threads, 0, coupler_stream>>>(
+            gels[i]->m_dbIndex,
+            gels[i]->m_dFn,
+            gels[i]->m_dun_norm,
+            d_Fl_all_ + off,
+            d_Cl_all_ + off,
+            Mi);
     }
 }
 
