@@ -25,6 +25,8 @@ public:
         void writeFiles(double time);
 
     cudaStream_t stream() const;
+    bool boundaryDirty() const;
+    void markBoundaryClean();
 
 public:
     void allocateHostStorage();
@@ -60,7 +62,7 @@ public:
 	double3* m_hFn_center;
 	double3* m_hVeln_center;
 	double3* m_hVeln;
-	double3* m_hFn;
+        double3* m_hFn;
 
 	int* m_hmap_node;
 	int* m_hmap_element;
@@ -102,7 +104,9 @@ public:
 	int* m_dmap_node;
 	int* m_dmap_element;
 	int* m_dbIndex;
-	double* m_dtime;
+        double* m_dtime;
+
+        bool m_boundaryDirty;
 
 public:
 	// params
