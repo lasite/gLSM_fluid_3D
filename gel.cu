@@ -181,9 +181,12 @@ void Gel::setInitValue()
 			}
 		}
 	}
-	//set node type
-	setType(m_hmap_node, 2);
-	setType(m_hmap_element, 1);
+        //set node type
+        setType(m_hmap_node, 2);
+        setType(m_hmap_element, 1);
+
+        // build the list of boundary nodes that the coupler needs to sample
+        buildBoundaryIndex();
 }
 
 void Gel::setType(int* a, int size)
