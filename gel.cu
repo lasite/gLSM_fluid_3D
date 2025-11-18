@@ -181,9 +181,12 @@ void Gel::setInitValue()
 			}
 		}
 	}
-	//set node type
-	setType(m_hmap_node, 2);
-	setType(m_hmap_element, 1);
+        //set node type
+        setType(m_hmap_node, 2);
+        setType(m_hmap_element, 1);
+
+        // build the list of boundary nodes that the coupler needs to sample
+        buildBoundaryIndex();
 }
 
 void Gel::setType(int* a, int size)
@@ -401,10 +404,10 @@ void Gel::writeFiles(double time)
 }
 
 Gel::Gel(int3 gelSize, double3 gelPosition, string gelType, int gelId, int time):
-	m_gelSize(gelSize),
-	m_gelId(gelId),
-	m_gelPosition(gelPosition),
-	m_gelType(gelType),
+        m_gelSize(gelSize),
+        m_gelId(gelId),
+        m_gelPosition(gelPosition),
+        m_gelType(gelType),
 	//CPU data
 	m_hum(0),
 	m_hvm(0),
@@ -437,9 +440,10 @@ Gel::Gel(int3 gelSize, double3 gelPosition, string gelType, int gelId, int time)
 	m_dnmSm(0),
 	m_dVolm(0),
 	m_dPrem(0),
-	m_dmap_element(0),
-	m_dmap_node(0),
-	m_dbIndex(0)
+        m_dmap_element(0),
+        m_dmap_node(0),
+        m_dbIndex(0),
+        m_boundaryDirty(true)
 {
 	m_dt = 1e-3;
 	m_df = int(1 / m_dt);
@@ -506,26 +510,43 @@ Gel::~Gel()
 
 void Gel::_initialize(int time)
 {
-	allocateHostStorage();
-	allocateDeviceStorage();
-	cudaStreamCreate(&m_gel_stream);
-	setInitValue();
-	copyDataToDevice();
+        allocateHostStorage();
+        allocateDeviceStorage();
+        cudaStreamCreate(&m_gel_stream);
+        setInitValue();
+        copyDataToDevice();
+        m_boundaryDirty = true;
+}
+
+cudaStream_t Gel::stream() const
+{
+        return m_gel_stream;
+}
+
+bool Gel::boundaryDirty() const
+{
+        return m_boundaryDirty;
+}
+
+void Gel::markBoundaryClean()
+{
+        m_boundaryDirty = false;
 }
 
 void Gel::update(long long int solverIterations)
 {
 	double time = solverIterations * m_dt;
-	if (solverIterations % 5 == 0) {
-		calServiceNodesPositionD << < m_gridDim2, m_blockDim, 0, m_gel_stream >> > (m_drn, m_dmap_node, m_dgp);
+        if (solverIterations % 5 == 0) {
+                calServiceNodesPositionD << < m_gridDim2, m_blockDim, 0, m_gel_stream >> > (m_drn, m_dmap_node, m_dgp);
 		calElementPropertiesD << <m_gridDim1, m_blockDim, 0, m_gel_stream >> > (m_drn, m_drm, m_drm_loc, m_dnmSm, m_dVolm, m_dwm, m_dwmp, m_dgp);
 		calPressureD << < m_gridDim_1, m_blockDim, 0, m_gel_stream >> > (m_dPrem, m_dvm, m_dwm, m_dgp);
 		calNodesVelocityD << < m_gridDim0, m_blockDim, 0, m_gel_stream >> > (m_drn, m_dVeln, m_dVels, m_dFn, m_dnmSm, m_dPrem, m_dwm, m_dgp);
 		calInternalNodesPositionD << < m_gridDim0, m_blockDim, 0, m_gel_stream >> > (m_drn, m_dVeln, m_dgp);
 		calChemBoundaryD << < m_gridDim1, m_blockDim, 0, m_gel_stream >> > (m_dum, m_dum_norm, m_dvm, m_dvm_norm, m_dwm, m_dmap_element, time, m_dgp);
-		calUnnormD << < m_gridDim0, m_blockDim, 0, m_gel_stream >> > (m_dun_norm, m_dum_norm, m_dvn_norm, m_dvm_norm, m_dgp);
-		calTermsD << < m_gridDim_1, m_blockDim, 0, m_gel_stream >> > (m_dT0m, m_dT1m, m_dT2m, m_dwm, m_dwmp, m_dVeln, m_dnmSm, m_dVolm, m_drm_loc, m_dun_norm, m_dum_norm, m_drm, m_dgp);
-	}
+                calUnnormD << < m_gridDim0, m_blockDim, 0, m_gel_stream >> > (m_dun_norm, m_dum_norm, m_dvn_norm, m_dvm_norm, m_dgp);
+                calTermsD << < m_gridDim_1, m_blockDim, 0, m_gel_stream >> > (m_dT0m, m_dT1m, m_dT2m, m_dwm, m_dwmp, m_dVeln, m_dnmSm, m_dVolm, m_drm_loc, m_dun_norm, m_dum_norm, m_drm, m_dgp);
+                m_boundaryDirty = true;
+        }
 	calChemD << < m_gridDim_1, m_blockDim, 0, m_gel_stream >> > (m_dvm, m_dum, m_dwm, m_dT0m, m_dT1m, m_dT2m, m_drm, time, m_dgp);
 	if (solverIterations % 1000 == 0) {
 		if (m_file_writer_thread.joinable()) {
