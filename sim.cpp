@@ -42,7 +42,8 @@ int main(int argc, char** argv)
         coupler->transferConcentration();
         for (int kk = 0; kk < fluid->Nsub; kk++) {
         //for (int kk = 0; kk < 1; kk++) {
-            coupler->update(solverIterations);
+            const bool spreadConcentration = (kk == 0);
+            coupler->update(solverIterations, spreadConcentration);
             fluid->update(solverIterations);
         }
         fluid->convectionAndDiffusion();

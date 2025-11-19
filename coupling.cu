@@ -130,7 +130,7 @@ void Coupler::_initialize()
     copyDataToDevice();
 }
 
-void Coupler::update(long long int solverIterations)
+void Coupler::update(long long int solverIterations, bool spreadConcentration)
 {
     float ramp = fmin(1, (solverIterations + 1) / 2000.0);
     float beta_eff = h_cp->beta * ramp;
