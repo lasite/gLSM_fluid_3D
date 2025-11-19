@@ -69,8 +69,8 @@ __global__ void k_ibm_interpolate_velocity(float3* u, float3* Ul, float3* lag, C
 	const int iy = (int)floor(gy);
 	const int iz = (int)floor(gz);
 
-	float3 ul = make_float3(0.0, 0.0, 0.0);
-	float wsum = 0.0;
+    float3 ul = make_float3(0.0, 0.0, 0.0);
+    float wsum = 0.0;
 
 	for (int ii = max(0, ix - 1); ii <= min(Nx - 1, ix + 2); ++ii) {
 		const float phix = delta4(gx - (float)ii);
@@ -85,7 +85,12 @@ __global__ void k_ibm_interpolate_velocity(float3* u, float3* Ul, float3* lag, C
 			}
 		}
 	}
-	Ul[l] = ul / wsum;
+    if (wsum > 0.0f) {
+            Ul[l] = ul / wsum;
+    }
+    else {
+            Ul[l] = make_float3(0.f, 0.f, 0.f);
+    }
 }
 
 __global__ void k_ibm_sample_concentration(float* c, float* Cl, float3* lag, CouplerParams* cp) {
@@ -103,8 +108,8 @@ __global__ void k_ibm_sample_concentration(float* c, float* Cl, float3* lag, Cou
 	const int iy = (int)floor(gy);
 	const int iz = (int)floor(gz);
 
-	float cl = 0.0f;
-	float wsum = 0.0f;
+    float cl = 0.0f;
+    float wsum = 0.0f;
 
 	for (int ii = max(0, ix - 1); ii <= min(Nx - 1, ix + 2); ++ii) {
 		const float phix = delta4(gx - (float)ii);
@@ -119,7 +124,12 @@ __global__ void k_ibm_sample_concentration(float* c, float* Cl, float3* lag, Cou
 			}
 		}
 	}
-	Cl[l] = cl / wsum;
+    if (wsum > 0.0f) {
+            Cl[l] = cl / wsum;
+    }
+    else {
+            Cl[l] = 0.0f;
+    }
 }
 
 __global__ void k_scale_negbeta(float3* Ul, float3* Vl, float3* Fl, float beta_eff, CouplerParams* cp) {
