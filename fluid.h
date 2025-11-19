@@ -42,6 +42,7 @@ protected:
 public:  // data
     // CPU data
     float3* h_u;
+    float* h_c1;
     int* h_bIndex;
     FluidParams* h_fp;
     // GPU data
