@@ -69,6 +69,9 @@ public:
     float niu;
     float dx_fluid;
     cudaStream_t fluid_stream;
+    cudaStream_t transfer_stream;
+    cudaEvent_t copy_trigger_event;
+    cudaEvent_t copy_ready_event;
     std::thread file_writer_thread;
     int threads;
     int blocksN;
