@@ -3,6 +3,7 @@
 #include "fluid_kernels.cuh"
 #include <memory.h>
 #include <tuple>
+#include <cstdlib>
 #include <iostream>
 #include <fstream>
 #include <iomanip>
@@ -18,8 +19,10 @@ int Fluid::idx3(int x, int y, int z, int Nx, int Ny)
 
 void Fluid::allocateHostStorage()
 {
-	h_u = new float3[N];
-	memset(h_u, 0, N * sizeof(float3));
+        h_u = (float3*)malloc(N * sizeof(float3));
+        memset(h_u, 0, N * sizeof(float3));
+        h_c1 = (float*)malloc(N * sizeof(float));
+        memset(h_c1, 0, N * sizeof(float));
 }
 
 void Fluid::allocateDeviceStorage()
@@ -49,13 +52,15 @@ void Fluid::setInitValue()
 
 void Fluid::copyDataToHost()
 {
-	cudaMemcpyAsync(h_u, d_u, sizeof(float3) * N, cudaMemcpyDeviceToHost, fluid_stream);
-	cudaStreamSynchronize(fluid_stream);
+        cudaMemcpyAsync(h_u, d_u, sizeof(float3) * N, cudaMemcpyDeviceToHost, fluid_stream);
+        cudaMemcpyAsync(h_c1, d_c1, sizeof(float) * N, cudaMemcpyDeviceToHost, fluid_stream);
+        cudaStreamSynchronize(fluid_stream);
 }
 
 void Fluid::freeHostMemory()
 {
-	free(h_u);
+        free(h_u);
+        free(h_c1);
 }
 
 void Fluid::freeDeviceMemory()
@@ -74,22 +79,27 @@ void Fluid::freeDeviceMemory()
 
 void Fluid::recordData(int time)
 {
-	if (time % 1 == 0) {
-		ofstream fVelb;
-		string  str_Velb;
-		str_Velb = "Velb" + to_string(time) + ".dat";
-		fVelb.open(str_Velb);
-		int gi;
-		for (int zi = 0; zi < fluidSize.z; zi++) {
-			for (int yi = 0; yi < fluidSize.y; yi++) {
-				for (int xi = 0; xi < fluidSize.x; xi++) {
-					gi = idx3(xi, yi, zi, fluidSize.x, fluidSize.y);
-					fVelb << setw(9) << to_string(h_u[gi].x) << "      " << setw(9) << to_string(h_u[gi].y) << "      " << setw(9) << to_string(h_u[gi].z) << "\n";
-				}
-			}
-		}
-		fVelb.close();
-	}
+        if (time % 1 == 0) {
+                ofstream fVelb;
+                string  str_Velb;
+                str_Velb = "Velb" + to_string(time) + ".dat";
+                fVelb.open(str_Velb);
+                ofstream fC1;
+                string str_C1 = "Conc" + to_string(time) + ".dat";
+                fC1.open(str_C1);
+                int gi;
+                for (int zi = 0; zi < fluidSize.z; zi++) {
+                        for (int yi = 0; yi < fluidSize.y; yi++) {
+                                for (int xi = 0; xi < fluidSize.x; xi++) {
+                                        gi = idx3(xi, yi, zi, fluidSize.x, fluidSize.y);
+                                        fVelb << setw(9) << to_string(h_u[gi].x) << "      " << setw(9) << to_string(h_u[gi].y) << "      " << setw(9) << to_string(h_u[gi].z) << "\n";
+                                        fC1 << setw(9) << to_string(h_c1[gi]) << "\n";
+                                }
+                        }
+                }
+                fVelb.close();
+                fC1.close();
+        }
 }
 
 void Fluid::writeFiles(double time)
@@ -100,8 +110,10 @@ void Fluid::writeFiles(double time)
 }
 
 Fluid::Fluid(int3 fluidSize, int time):
-	fluidSize(fluidSize),
-	d_f(0),
+        fluidSize(fluidSize),
+        h_u(0),
+        h_c1(0),
+        d_f(0),
 	d_fpost(0),
 	d_fnext(0),
 	d_rho(0),
@@ -164,11 +176,11 @@ Fluid::~Fluid()
 
 void Fluid::_initialize(int time)
 {
-allocateHostStorage();
-allocateDeviceStorage();
-cudaStreamCreate(&fluid_stream);
-copyDataToDevice();
-setInitValue();
+        allocateHostStorage();
+        allocateDeviceStorage();
+        cudaStreamCreate(&fluid_stream);
+        copyDataToDevice();
+        setInitValue();
 }
 
 cudaStream_t Fluid::stream() const
