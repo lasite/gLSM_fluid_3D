@@ -21,7 +21,8 @@ public:
 	void packFromGels();
 	void scatterToGels();
 	void applyGelRepulsion();
-        void update(long long int solverIterations, bool spreadConcentration);
+        void update(long long int solverIterations);
+        void transferConcentration();
 	void _initialize();
 	void _finalize();
 

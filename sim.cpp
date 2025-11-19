@@ -39,6 +39,7 @@ int main(int argc, char** argv)
             g->recordUpdateCompleteEvent();
         }
         coupler->packFromGels();
+        coupler->transferConcentration();
         for (int kk = 0; kk < fluid->Nsub; kk++) {
         //for (int kk = 0; kk < 1; kk++) {
             const bool spreadConcentration = (kk == 0);

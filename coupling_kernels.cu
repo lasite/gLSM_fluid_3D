@@ -54,7 +54,7 @@ __device__ static int id3(int x, int y, int z, int Nx, int Ny) {
 	return x + y * Nx + z * Nx * Ny;
 }
 
-__global__ void k_ibm_interpolate(float3* u, float* c, float3* Ul, float* Cl, float3* lag, CouplerParams* cp) {
+__global__ void k_ibm_interpolate_velocity(float3* u, float3* Ul, float3* lag, CouplerParams* cp) {
 	int l = blockDim.x * blockIdx.x + threadIdx.x;
 	if (l >= cp->M) return;
 
@@ -70,7 +70,6 @@ __global__ void k_ibm_interpolate(float3* u, float* c, float3* Ul, float* Cl, fl
 	const int iz = (int)floor(gz);
 
 	float3 ul = make_float3(0.0, 0.0, 0.0);
-	float cl = 0.0;
 	float wsum = 0.0;
 
 	for (int ii = max(0, ix - 1); ii <= min(Nx - 1, ix + 2); ++ii) {
@@ -82,16 +81,45 @@ __global__ void k_ibm_interpolate(float3* u, float* c, float3* Ul, float* Cl, fl
 				const float w = phix * phiy * phiz;
 				const int id = id3(ii, jj, kk, Nx, Ny);
 				ul += u[id] * w;
-				cl += c[id] * w;
 				wsum += w;
 			}
 		}
 	}
 	Ul[l] = ul / wsum;
+}
+
+__global__ void k_ibm_sample_concentration(float* c, float* Cl, float3* lag, CouplerParams* cp) {
+	int l = blockDim.x * blockIdx.x + threadIdx.x;
+	if (l >= cp->M) return;
+
+	const float h = cp->h;
+	const int Nx = cp->L.x, Ny = cp->L.y, Nz = cp->L.z;
+
+	const float gx = lag[l].x / h;
+	const float gy = lag[l].y / h;
+	const float gz = lag[l].z / h;
+
+	const int ix = (int)floor(gx);
+	const int iy = (int)floor(gy);
+	const int iz = (int)floor(gz);
+
+	float cl = 0.0f;
+	float wsum = 0.0f;
+
+	for (int ii = max(0, ix - 1); ii <= min(Nx - 1, ix + 2); ++ii) {
+		const float phix = delta4(gx - (float)ii);
+		for (int jj = max(0, iy - 1); jj <= min(Ny - 1, iy + 2); ++jj) {
+			const float phiy = delta4(gy - (float)jj);
+			for (int kk = max(0, iz - 1); kk <= min(Nz - 1, iz + 2); ++kk) {
+				const float phiz = delta4(gz - (float)kk);
+				const float w = phix * phiy * phiz;
+				const int id = id3(ii, jj, kk, Nx, Ny);
+				cl += c[id] * w;
+				wsum += w;
+			}
+		}
+	}
 	Cl[l] = cl / wsum;
-	//if (l == 0) {
-	//	printf("%f, %f\n", Ul[l], Cl[l]);
-	//}
 }
 
 __global__ void k_scale_negbeta(float3* Ul, float3* Vl, float3* Fl, float beta_eff, CouplerParams* cp) {
@@ -123,7 +151,7 @@ __global__ void k_add_reaction_to_gel(int* bIndex, double3* Fn, double* un_norm,
 	//}
 }
 
-__global__ void k_ibm_spread(float3* F_ibm, float* c, float3* Fl, float* Dl, float3* lag, float* dA, CouplerParams* cp, bool accumulateConcentration) {
+__global__ void k_ibm_spread_forces(float3* F_ibm, float3* Fl, float3* lag, float* dA, CouplerParams* cp) {
 	int l = blockDim.x * blockIdx.x + threadIdx.x;
 	if (l >= cp->M) return;
 
@@ -139,7 +167,6 @@ __global__ void k_ibm_spread(float3* F_ibm, float* c, float3* Fl, float* Dl, flo
 	const int iz = (int)floor(gz);
 
 	const float3 fL = Fl[l];
-	const float dL = Dl[l];
 
 	float wsum = 0.0;
 	for (int ii = max(0, ix - 1); ii <= min(Nx - 1, ix + 2); ++ii) {
@@ -154,8 +181,6 @@ __global__ void k_ibm_spread(float3* F_ibm, float* c, float3* Fl, float* Dl, flo
 	}
 	if (wsum == 0.0) return;
 
-	// δ_h = (1/h^3) φ(·/h)  → 扩散时需要乘 1/h^3
-	// scale 还乘 dA[l]，并做近壁面 wsum 归一化，保证 ∑_grid F_ibm * h^3 ≈ ∑_l Fl * dA_l
 	const float inv_h3 = 1.0 / (h * h * h);
 	const float scale = 1 * inv_h3 / wsum;
 
@@ -170,17 +195,59 @@ __global__ void k_ibm_spread(float3* F_ibm, float* c, float3* Fl, float* Dl, flo
 				atomicAdd(&F_ibm[id].x, fL.x * w);
 				atomicAdd(&F_ibm[id].y, fL.y * w);
 				atomicAdd(&F_ibm[id].z, fL.z * w);
-                                if (accumulateConcentration) {
-                                        atomicAdd(&c[id], dL * w);
-                                }
-				//if (l == 0) {
-				//	printf("%f, %f, %f, %f\n", F_ibm[id].x, F_ibm[id].y, F_ibm[id].z, c[id]);
-				//}
 			}
 		}
 	}
 
 }
+
+__global__ void k_ibm_spread_concentration(float* c, float* Dl, float3* lag, float* dA, CouplerParams* cp) {
+	int l = blockDim.x * blockIdx.x + threadIdx.x;
+	if (l >= cp->M) return;
+
+	const float h = cp->h;
+	const int Nx = cp->L.x, Ny = cp->L.y, Nz = cp->L.z;
+
+	const float gx = lag[l].x / h;
+	const float gy = lag[l].y / h;
+	const float gz = lag[l].z / h;
+
+	const int ix = (int)floor(gx);
+	const int iy = (int)floor(gy);
+	const int iz = (int)floor(gz);
+
+	const float dL = Dl[l];
+
+	float wsum = 0.0f;
+	for (int ii = max(0, ix - 1); ii <= min(Nx - 1, ix + 2); ++ii) {
+		const float phix = delta4(gx - (float)ii);
+		for (int jj = max(0, iy - 1); jj <= min(Ny - 1, iy + 2); ++jj) {
+			const float phiy = delta4(gy - (float)jj);
+			for (int kk = max(0, iz - 1); kk <= min(Nz - 1, iz + 2); ++kk) {
+				const float phiz = delta4(gz - (float)kk);
+				wsum += phix * phiy * phiz;
+			}
+		}
+	}
+	if (wsum == 0.0f) return;
+
+	const float inv_h3 = 1.0f / (h * h * h);
+	const float scale = 1 * inv_h3 / wsum;
+
+	for (int ii = max(0, ix - 1); ii <= min(Nx - 1, ix + 2); ++ii) {
+		const float phix = delta4(gx - (float)ii);
+		for (int jj = max(0, iy - 1); jj <= min(Ny - 1, iy + 2); ++jj) {
+			const float phiy = delta4(gy - (float)jj);
+			for (int kk = max(0, iz - 1); kk <= min(Nz - 1, iz + 2); ++kk) {
+				const float phiz = delta4(gz - (float)kk);
+				const float w = phix * phiy * phiz * scale;
+				const int id = id3(ii, jj, kk, Nx, Ny);
+				atomicAdd(&c[id], dL * w);
+			}
+		}
+	}
+}
+
 
 __device__ __forceinline__ float3 to_float3(const double3 a) {
 	return make_float3(__double2float_rn(a.x),
