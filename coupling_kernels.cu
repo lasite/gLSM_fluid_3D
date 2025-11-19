@@ -123,7 +123,7 @@ __global__ void k_add_reaction_to_gel(int* bIndex, double3* Fn, double* un_norm,
 	//}
 }
 
-__global__ void k_ibm_spread(float3* F_ibm, float* c, float3* Fl, float* Dl, float3* lag, float* dA, CouplerParams* cp) {
+__global__ void k_ibm_spread(float3* F_ibm, float* c, float3* Fl, float* Dl, float3* lag, float* dA, CouplerParams* cp, bool accumulateConcentration) {
 	int l = blockDim.x * blockIdx.x + threadIdx.x;
 	if (l >= cp->M) return;
 
@@ -170,7 +170,9 @@ __global__ void k_ibm_spread(float3* F_ibm, float* c, float3* Fl, float* Dl, flo
 				atomicAdd(&F_ibm[id].x, fL.x * w);
 				atomicAdd(&F_ibm[id].y, fL.y * w);
 				atomicAdd(&F_ibm[id].z, fL.z * w);
-				atomicAdd(&c[id], dL * w);
+                                if (accumulateConcentration) {
+                                        atomicAdd(&c[id], dL * w);
+                                }
 				//if (l == 0) {
 				//	printf("%f, %f, %f, %f\n", F_ibm[id].x, F_ibm[id].y, F_ibm[id].z, c[id]);
 				//}

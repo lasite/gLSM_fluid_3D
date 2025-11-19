@@ -130,7 +130,7 @@ void Coupler::_initialize()
     copyDataToDevice();
 }
 
-void Coupler::update(long long int solverIterations)
+void Coupler::update(long long int solverIterations, bool spreadConcentration)
 {
     float ramp = fmin(1, (solverIterations + 1) / 2000.0);
     float beta_eff = h_cp->beta * ramp;
@@ -139,7 +139,7 @@ void Coupler::update(long long int solverIterations)
     k_ibm_interpolate << <blocksM, threads, 0, fluid_stream >> > (fluid->d_u, fluid->d_c1, d_Ul_all_, d_Dl_all_, d_lag_all_, d_cp);
     k_scale_negbeta << <blocksM, threads, 0, fluid_stream >> > (d_Ul_all_, d_Vl_all_, d_Fl_all_, beta_eff, d_cp);
     std::swap(d_Cl_all_, d_Dl_all_);
-    k_ibm_spread << <blocksM, threads, 0, fluid_stream >> > (fluid->d_F_ibm, fluid->d_c1, d_Fl_all_, d_Dl_all_, d_lag_all_, d_A, d_cp);
+    k_ibm_spread << <blocksM, threads, 0, fluid_stream >> > (fluid->d_F_ibm, fluid->d_c1, d_Fl_all_, d_Dl_all_, d_lag_all_, d_A, d_cp, spreadConcentration);
     cudaEventRecord(ibm_complete_event, fluid_stream);
 }
 
