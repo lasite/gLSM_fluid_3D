@@ -6,7 +6,7 @@
 
 using namespace std;
 
-#define runstep 1000
+#define runstep 10000
 
 int main(int argc, char** argv)
 {
@@ -45,7 +45,7 @@ int main(int argc, char** argv)
             fluid->update(solverIterations);
         }
         fluid->convectionAndDiffusion();
-        coupler->applyGelRepulsion();
+        /*coupler->applyGelRepulsion();*/
         coupler->scatterToGels();
     }
     delete fluid;
