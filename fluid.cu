@@ -19,10 +19,10 @@ int Fluid::idx3(int x, int y, int z, int Nx, int Ny)
 
 void Fluid::allocateHostStorage()
 {
-        h_u = (float3*)malloc(N * sizeof(float3));
-        memset(h_u, 0, N * sizeof(float3));
-        h_c1 = (float*)malloc(N * sizeof(float));
-        memset(h_c1, 0, N * sizeof(float));
+cudaHostAlloc((void**)&h_u, N * sizeof(float3), cudaHostAllocPortable);
+memset(h_u, 0, N * sizeof(float3));
+cudaHostAlloc((void**)&h_c1, N * sizeof(float), cudaHostAllocPortable);
+memset(h_c1, 0, N * sizeof(float));
 }
 
 void Fluid::allocateDeviceStorage()
@@ -52,15 +52,17 @@ void Fluid::setInitValue()
 
 void Fluid::copyDataToHost()
 {
-        cudaMemcpyAsync(h_u, d_u, sizeof(float3) * N, cudaMemcpyDeviceToHost, fluid_stream);
-        cudaMemcpyAsync(h_c1, d_c1, sizeof(float) * N, cudaMemcpyDeviceToHost, fluid_stream);
-        cudaStreamSynchronize(fluid_stream);
+cudaEventRecord(copy_trigger_event, fluid_stream);
+cudaStreamWaitEvent(transfer_stream, copy_trigger_event, 0);
+cudaMemcpyAsync(h_u, d_u, sizeof(float3) * N, cudaMemcpyDeviceToHost, transfer_stream);
+cudaMemcpyAsync(h_c1, d_c1, sizeof(float) * N, cudaMemcpyDeviceToHost, transfer_stream);
+cudaEventRecord(copy_ready_event, transfer_stream);
 }
 
 void Fluid::freeHostMemory()
 {
-        free(h_u);
-        free(h_c1);
+cudaFreeHost(h_u);
+cudaFreeHost(h_c1);
 }
 
 void Fluid::freeDeviceMemory()
@@ -104,23 +106,28 @@ void Fluid::recordData(int time)
 
 void Fluid::writeFiles(double time)
 {
-	if (int(time * 1) % 1 == 0) {
-		recordData(int(time * 1));
-	}
+cudaEventSynchronize(copy_ready_event);
+if (int(time * 1) % 1 == 0) {
+recordData(int(time * 1));
+}
 }
 
 Fluid::Fluid(int3 fluidSize, int time):
-        fluidSize(fluidSize),
-        h_u(0),
-        h_c1(0),
-        d_f(0),
-	d_fpost(0),
-	d_fnext(0),
-	d_rho(0),
-	d_u(0),
-	d_F(0),
-	d_F_ibm(0),
-	d_F_tot(0)
+fluidSize(fluidSize),
+h_u(0),
+h_c1(0),
+d_f(0),
+d_fpost(0),
+d_fnext(0),
+d_rho(0),
+d_u(0),
+d_F(0),
+d_F_ibm(0),
+d_F_tot(0),
+fluid_stream(0),
+transfer_stream(0),
+copy_trigger_event(0),
+copy_ready_event(0)
 {
 	dt = 1e-3f;
 	N = fluidSize.x * fluidSize.y * fluidSize.z;
@@ -176,11 +183,14 @@ Fluid::~Fluid()
 
 void Fluid::_initialize(int time)
 {
-        allocateHostStorage();
-        allocateDeviceStorage();
-        cudaStreamCreate(&fluid_stream);
-        copyDataToDevice();
-        setInitValue();
+allocateHostStorage();
+allocateDeviceStorage();
+cudaStreamCreate(&fluid_stream);
+cudaStreamCreateWithFlags(&transfer_stream, cudaStreamNonBlocking);
+cudaEventCreateWithFlags(&copy_trigger_event, cudaEventDisableTiming);
+cudaEventCreateWithFlags(&copy_ready_event, cudaEventDisableTiming);
+copyDataToDevice();
+setInitValue();
 }
 
 cudaStream_t Fluid::stream() const
@@ -215,10 +225,13 @@ void Fluid::update(long long int solverIterations)
 
 void Fluid::_finalize()
 {
-	cudaStreamDestroy(fluid_stream);
-	if (file_writer_thread.joinable()) {
-		file_writer_thread.join();
-	}
-	freeHostMemory();
-	freeDeviceMemory();
+if (file_writer_thread.joinable()) {
+file_writer_thread.join();
+}
+cudaStreamDestroy(fluid_stream);
+cudaStreamDestroy(transfer_stream);
+cudaEventDestroy(copy_trigger_event);
+cudaEventDestroy(copy_ready_event);
+freeHostMemory();
+freeDeviceMemory();
 }
