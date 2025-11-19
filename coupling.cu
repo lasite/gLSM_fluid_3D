@@ -136,11 +136,19 @@ void Coupler::update(long long int solverIterations)
     float beta_eff = h_cp->beta * ramp;
     cudaStream_t fluid_stream = fluid->stream();
     cudaStreamWaitEvent(fluid_stream, pack_complete_event, 0);
-    k_ibm_interpolate << <blocksM, threads, 0, fluid_stream >> > (fluid->d_u, fluid->d_c1, d_Ul_all_, d_Dl_all_, d_lag_all_, d_cp);
-    k_scale_negbeta << <blocksM, threads, 0, fluid_stream >> > (d_Ul_all_, d_Vl_all_, d_Fl_all_, beta_eff, d_cp);
-    std::swap(d_Cl_all_, d_Dl_all_);
-    k_ibm_spread << <blocksM, threads, 0, fluid_stream >> > (fluid->d_F_ibm, fluid->d_c1, d_Fl_all_, d_Dl_all_, d_lag_all_, d_A, d_cp);
+    k_ibm_interpolate_velocity<<<blocksM, threads, 0, fluid_stream>>>(fluid->d_u, d_Ul_all_, d_lag_all_, d_cp);
+    k_scale_negbeta<<<blocksM, threads, 0, fluid_stream>>>(d_Ul_all_, d_Vl_all_, d_Fl_all_, beta_eff, d_cp);
+    k_ibm_spread_forces<<<blocksM, threads, 0, fluid_stream>>>(fluid->d_F_ibm, d_Fl_all_, d_lag_all_, d_A, d_cp);
     cudaEventRecord(ibm_complete_event, fluid_stream);
+}
+
+void Coupler::transferConcentration()
+{
+    cudaStream_t fluid_stream = fluid->stream();
+    cudaStreamWaitEvent(fluid_stream, pack_complete_event, 0);
+    k_ibm_sample_concentration<<<blocksM, threads, 0, fluid_stream>>>(fluid->d_c1, d_Dl_all_, d_lag_all_, d_cp);
+    std::swap(d_Cl_all_, d_Dl_all_);
+    k_ibm_spread_concentration<<<blocksM, threads, 0, fluid_stream>>>(fluid->d_c1, d_Dl_all_, d_lag_all_, d_A, d_cp);
 }
 
 void Coupler::freeHostMemory()
