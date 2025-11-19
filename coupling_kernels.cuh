@@ -8,7 +8,7 @@ __global__ void k_scale_negbeta(float3* Ul, float3* Vl, float3* Fl, float beta_e
 __global__ void k_add_reaction_to_gel(int* bIndex, double3* Fn, double* un_norm,
     float3* Fl, float* Cl, int M);
 
-__global__ void k_ibm_spread(float3* F_ibm, float* c, float3* Fl, float* Dl, float3* lag, float* dA, CouplerParams* cp);
+__global__ void k_ibm_spread(float3* F_ibm, float* c, float3* Fl, float* Dl, float3* lag, float* dA, CouplerParams* cp, bool accumulateConcentration);
 
 __global__ void k_gather_boundary(int* bIndex, double3* rn, double3* vn, double* un_norm,
     float3* lag, float3* Vl, float* Cl, int M);
