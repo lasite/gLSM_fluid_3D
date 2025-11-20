@@ -1,6 +1,5 @@
 #include "coupling.h"
 #include "gel.h"
-#include "fluid.h"
 #include "coupling_kernels.cuh"
 
 void Coupler::allocateHostStorage()
@@ -45,9 +44,8 @@ void Coupler::setInitValue()
         sumM += h_gelBoundaryCount[i];
     }
 }
-Coupler::Coupler(std::vector<Gel*>& gels, Fluid* fluid) :
+Coupler::Coupler(std::vector<Gel*>& gels) :
     gels(gels),
-    fluid(fluid),
     d_lag_all_(0),
     d_Ul_all_(0),
     d_Vl_all_(0),
@@ -65,25 +63,18 @@ Coupler::Coupler(std::vector<Gel*>& gels, Fluid* fluid) :
     blocksM = (sumGelBoundaryCount + threads - 1) / threads;
     h_cp = new CouplerParams;
     memset(h_cp, 0, sizeof(CouplerParams));
-    h_cp->h = fluid->h_fp->h;
-    h_cp->L = fluid->h_fp->L;
     h_cp->M = sumGelBoundaryCount;
-    h_cp->beta = 0.1;
-    h_cp->delta = 1e-4;
-    h_cp->gamma = 1.5;
+    h_cp->delta = 1e-4f;
+    h_cp->gamma = 1.5f;
     _initialize();
 }
 
 void Coupler::packFromGels() {
     for (int i = 0; i < numGels; ++i) {
-        if (!gels[i]->boundaryDirty()) {
-            continue;
-        }
         const int off = h_offsets[i];
         const int Mi = gels[i]->m_boundaryCount;
         const int blocks = (Mi + threads - 1) / threads;
-        cudaStreamWaitEvent(coupler_stream, gels[i]->updateCompleteEvent(), 0);
-        k_gather_boundary << <blocks, threads, 0, coupler_stream >> > (
+        k_gather_boundary << <blocks, threads, 0, gels[i]->m_gel_stream >> > (
             gels[i]->m_dbIndex,
             gels[i]->m_drn,
             gels[i]->m_dVels,
@@ -92,19 +83,15 @@ void Coupler::packFromGels() {
             d_Vl_all_ + off,
             d_Cl_all_ + off,
             Mi);
-
-        gels[i]->markBoundaryClean();
     }
-    cudaEventRecord(pack_complete_event, coupler_stream);
 }
 
 void Coupler::scatterToGels() {
-    cudaStreamWaitEvent(coupler_stream, ibm_complete_event, 0);
     for (int i = 0; i < numGels; ++i) {
         const int Mi = gels[i]->m_boundaryCount;
         const int off = h_offsets[i];
         const int blocks = (Mi + threads - 1) / threads;
-        k_add_reaction_to_gel<<<blocks, threads, 0, coupler_stream>>>(
+        k_add_reaction_to_gel<<<blocks, threads, 0, gels[i]->m_gel_stream >>>(
             gels[i]->m_dbIndex,
             gels[i]->m_dFn,
             gels[i]->m_dun_norm,
@@ -115,7 +102,6 @@ void Coupler::scatterToGels() {
 }
 
 void Coupler::applyGelRepulsion() {
-    cudaStreamWaitEvent(coupler_stream, ibm_complete_event, 0);
     k_gel_repulsion << <blocksM, threads, 0, coupler_stream >> > (d_lag_all_, d_owner, d_Fl_all_, d_cp);
 }
 
@@ -123,32 +109,8 @@ void Coupler::_initialize()
 {
     allocateHostStorage();
     allocateDeviceStorage();
-    cudaStreamCreate(&coupler_stream);
-    cudaEventCreateWithFlags(&pack_complete_event, cudaEventDisableTiming);
-    cudaEventCreateWithFlags(&ibm_complete_event, cudaEventDisableTiming);
     setInitValue();
     copyDataToDevice();
-}
-
-void Coupler::update(long long int solverIterations)
-{
-    float ramp = fmin(1, (solverIterations + 1) / 2000.0);
-    float beta_eff = h_cp->beta * ramp;
-    cudaStream_t fluid_stream = fluid->stream();
-    cudaStreamWaitEvent(fluid_stream, pack_complete_event, 0);
-    k_ibm_interpolate_velocity<<<blocksM, threads, 0, fluid_stream>>>(fluid->d_u, d_Ul_all_, d_lag_all_, d_cp);
-    k_scale_negbeta<<<blocksM, threads, 0, fluid_stream>>>(d_Ul_all_, d_Vl_all_, d_Fl_all_, beta_eff, d_cp);
-    k_ibm_spread_forces<<<blocksM, threads, 0, fluid_stream>>>(fluid->d_F_ibm, d_Fl_all_, d_lag_all_, d_A, d_cp);
-    cudaEventRecord(ibm_complete_event, fluid_stream);
-}
-
-void Coupler::transferConcentration()
-{
-    cudaStream_t fluid_stream = fluid->stream();
-    cudaStreamWaitEvent(fluid_stream, pack_complete_event, 0);
-    k_ibm_sample_concentration<<<blocksM, threads, 0, fluid_stream>>>(fluid->d_c1, d_Dl_all_, d_lag_all_, d_cp);
-    std::swap(d_Cl_all_, d_Dl_all_);
-    k_ibm_spread_concentration<<<blocksM, threads, 0, fluid_stream>>>(fluid->d_c1, d_Dl_all_, d_lag_all_, d_A, d_cp);
 }
 
 void Coupler::freeHostMemory()
@@ -169,8 +131,6 @@ void Coupler::freeDeviceMemory()
 
 void Coupler::_finalize()
 {
-    cudaEventDestroy(pack_complete_event);
-    cudaEventDestroy(ibm_complete_event);
     cudaStreamDestroy(coupler_stream);
     freeDeviceMemory();
 }

@@ -1,6 +1,4 @@
 #include <cmath>
-#include "gel_kernels.cuh"
-#include <memory.h>
 #include <tuple>
 #include <iostream>
 #include <fstream>
@@ -8,6 +6,9 @@
 #include <sstream>
 #include <functional>
 #include <cuda_runtime.h>
+
+#include "gel_kernels.cuh"
+#include <memory.h>
 using namespace std;
 void Gel::allocateHostStorage()
 {
@@ -393,21 +394,25 @@ void Gel::recordData(int time)
 		fFn.close();
 		fVeln.close();
 	}
-
 }
 
-void Gel::writeFiles(double time)
+void Gel::writeFiles(int iter)
 {
-	if (int(time * 1) % 1 == 0) {
-		recordData(int(time * 1));
+	int time = int(iter * m_dt);
+	if (iter % 1000 == 0) {
+		if (m_file_writer_thread.joinable()) {
+			m_file_writer_thread.join();
+		}
+		copyDataToHost();
+		m_file_writer_thread = thread(&Gel::recordData, this, time);
 	}
 }
 
 Gel::Gel(int3 gelSize, double3 gelPosition, string gelType, int gelId, int time):
-        m_gelSize(gelSize),
-        m_gelId(gelId),
-        m_gelPosition(gelPosition),
-        m_gelType(gelType),
+	m_gelSize(gelSize),
+	m_gelId(gelId),
+	m_gelPosition(gelPosition),
+	m_gelType(gelType),
 	//CPU data
 	m_hum(0),
 	m_hvm(0),
@@ -440,10 +445,9 @@ Gel::Gel(int3 gelSize, double3 gelPosition, string gelType, int gelId, int time)
 	m_dnmSm(0),
 	m_dVolm(0),
 	m_dPrem(0),
-        m_dmap_element(0),
-        m_dmap_node(0),
-        m_dbIndex(0),
-        m_boundaryDirty(true)
+	m_dmap_element(0),
+	m_dmap_node(0),
+	m_dbIndex(0)
 {
 	m_dt = 1e-3;
 	m_df = int(1 / m_dt);
@@ -490,9 +494,6 @@ Gel::Gel(int3 gelSize, double3 gelPosition, string gelType, int gelId, int time)
 	m_hgp->AZ0 = 100.0;
 	m_hgp->FA0 = 0.139;
 	steadyStateValue(m_hgp->uss, m_hgp->vss, m_hgp->wss, 0);
-	int LX_ = m_gelSize.x - 1;
-	int LY_ = m_gelSize.y - 1;
-	int LZ_ = m_gelSize.z - 1;
 	int3 offset[27] = {
 	{ 0, 0, 0 },
 	{ 1, 0, 0 }, { -1, 0, 0 }, { 0, 1, 0 }, { 0, -1, 0 }, { 0, 0, 1 }, { 0, 0, -1 },
@@ -510,71 +511,40 @@ Gel::~Gel()
 
 void Gel::_initialize(int time)
 {
-        allocateHostStorage();
-        allocateDeviceStorage();
-        cudaStreamCreate(&m_gel_stream);
-        cudaEventCreateWithFlags(&m_update_complete_event, cudaEventDisableTiming);
-        setInitValue();
-        copyDataToDevice();
-        m_boundaryDirty = true;
+	allocateHostStorage();
+	allocateDeviceStorage();
+	cudaStreamCreate(&m_gel_stream);
+	setInitValue();
+	copyDataToDevice();
 }
 
-cudaStream_t Gel::stream() const
+void Gel::stepElasticity(int iter)
 {
-        return m_gel_stream;
-}
-
-void Gel::recordUpdateCompleteEvent()
-{
-        cudaEventRecord(m_update_complete_event, m_gel_stream);
-}
-
-cudaEvent_t Gel::updateCompleteEvent() const
-{
-        return m_update_complete_event;
-}
-
-bool Gel::boundaryDirty() const
-{
-        return m_boundaryDirty;
-}
-
-void Gel::markBoundaryClean()
-{
-        m_boundaryDirty = false;
-}
-
-void Gel::update(long long int solverIterations)
-{
-	double time = solverIterations * m_dt;
-        if (solverIterations % 1 == 0) {
-			calServiceNodesPositionD << < m_gridDim2, m_blockDim, 0, m_gel_stream >> > (m_drn, m_dmap_node, m_dgp);
-			calElementPropertiesD << <m_gridDim1, m_blockDim, 0, m_gel_stream >> > (m_drn, m_drm, m_drm_loc, m_dnmSm, m_dVolm, m_dwm, m_dwmp, m_dgp);
-			calPressureD << < m_gridDim_1, m_blockDim, 0, m_gel_stream >> > (m_dPrem, m_dvm, m_dwm, m_dgp);
-			calNodesVelocityD << < m_gridDim0, m_blockDim, 0, m_gel_stream >> > (m_drn, m_dVeln, m_dVels, m_dFn, m_dnmSm, m_dPrem, m_dwm, m_dgp);
-			calInternalNodesPositionD << < m_gridDim0, m_blockDim, 0, m_gel_stream >> > (m_drn, m_dVeln, m_dgp);
-			calChemBoundaryD << < m_gridDim1, m_blockDim, 0, m_gel_stream >> > (m_dum, m_dum_norm, m_dvm, m_dvm_norm, m_dwm, m_dmap_element, time, m_dgp);
-			calUnnormD << < m_gridDim0, m_blockDim, 0, m_gel_stream >> > (m_dun_norm, m_dum_norm, m_dvn_norm, m_dvm_norm, m_dgp);
-			calTermsD << < m_gridDim_1, m_blockDim, 0, m_gel_stream >> > (m_dT0m, m_dT1m, m_dT2m, m_dwm, m_dwmp, m_dVeln, m_dnmSm, m_dVolm, m_drm_loc, m_dun_norm, m_dum_norm, m_drm, m_dgp);
-			m_boundaryDirty = true;
-        }
-	calChemD << < m_gridDim_1, m_blockDim, 0, m_gel_stream >> > (m_dvm, m_dum, m_dwm, m_dT0m, m_dT1m, m_dT2m, m_drm, time, m_dgp);
-	if (solverIterations % 1000 == 0) {
-		if (m_file_writer_thread.joinable()) {
-			m_file_writer_thread.join();
-		}
-		copyDataToHost();
-		m_file_writer_thread = thread(mem_fn(&Gel::writeFiles), this, time);
+	if (iter % 5 == 0) {
+		int time = int(iter * m_dt);
+		calServiceNodesPositionD << < m_gridDim2, m_blockDim, 0, m_gel_stream >> > (m_drn, m_dmap_node, m_dgp);
+		calElementPropertiesD << <m_gridDim1, m_blockDim, 0, m_gel_stream >> > (m_drn, m_drm, m_drm_loc, m_dnmSm, m_dVolm, m_dwm, m_dwmp, m_dgp);
+		calPressureD << < m_gridDim_1, m_blockDim, 0, m_gel_stream >> > (m_dPrem, m_dvm, m_dwm, m_dgp);
+		calNodesVelocityD << < m_gridDim0, m_blockDim, 0, m_gel_stream >> > (m_drn, m_dVeln, m_dVels, m_dFn, m_dnmSm, m_dPrem, m_dwm, m_dgp);
+		calInternalNodesPositionD << < m_gridDim0, m_blockDim, 0, m_gel_stream >> > (m_drn, m_dVeln, m_dgp);
+		calChemBoundaryD << < m_gridDim1, m_blockDim, 0, m_gel_stream >> > (m_dum, m_dum_norm, m_dvm, m_dvm_norm, m_dwm, m_dmap_element, time, m_dgp);
+		calUnnormD << < m_gridDim0, m_blockDim, 0, m_gel_stream >> > (m_dun_norm, m_dum_norm, m_dvn_norm, m_dvm_norm, m_dgp);
+		calTermsD << < m_gridDim_1, m_blockDim, 0, m_gel_stream >> > (m_dT0m, m_dT1m, m_dT2m, m_dwm, m_dwmp, m_dVeln, m_dnmSm, m_dVolm, m_drm_loc, m_dun_norm, m_dum_norm, m_drm, m_dgp);
 	}
+}
+
+void Gel::stepChemistry(int iter)
+{
+	int time = int(iter * m_dt);
+	calChemD << < m_gridDim_1, m_blockDim, 0, m_gel_stream >> > (m_dvm, m_dum, m_dwm, m_dT0m, m_dT1m, m_dT2m, m_drm, time, m_dgp);
 }
 
 void Gel::_finalize()
 {
-        cudaEventDestroy(m_update_complete_event);
-        cudaStreamDestroy(m_gel_stream);
-        if (m_file_writer_thread.joinable()) {
-                m_file_writer_thread.join();
-        }
+	if (m_file_writer_thread.joinable()) {
+		m_file_writer_thread.join();
+	}
+    cudaStreamDestroy(m_gel_stream);
 	freeHostMemory();
 	freeDeviceMemory();
 }

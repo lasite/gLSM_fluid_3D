@@ -1,6 +1,6 @@
-#include <thread>
 #include <cuda_runtime.h>
 #include <string>
+#include <thread>
 
 struct GelParams {
 	int LX, LY, LZ;
@@ -20,15 +20,10 @@ public:
     ~Gel();
 
     void _initialize(int time);
-    void update(long long int solverIterations);
+	void stepChemistry(int iter);
+	void stepElasticity(int iter);
     void _finalize();
-        void writeFiles(double time);
-
-    cudaStream_t stream() const;
-    void recordUpdateCompleteEvent();
-    cudaEvent_t updateCompleteEvent() const;
-    bool boundaryDirty() const;
-    void markBoundaryClean();
+	void writeFiles(int iter);
 
 public:
     void allocateHostStorage();
@@ -64,7 +59,7 @@ public:
 	double3* m_hFn_center;
 	double3* m_hVeln_center;
 	double3* m_hVeln;
-        double3* m_hFn;
+    double3* m_hFn;
 
 	int* m_hmap_node;
 	int* m_hmap_element;
@@ -106,9 +101,7 @@ public:
 	int* m_dmap_node;
 	int* m_dmap_element;
 	int* m_dbIndex;
-        double* m_dtime;
-
-        bool m_boundaryDirty;
+    double* m_dtime;
 
 public:
 	// params
@@ -121,10 +114,9 @@ public:
 	int m_numGelElements;
 	int m_numGelNodes;
 	int m_boundaryCount;
+    cudaStream_t m_gel_stream;
 	std::thread m_file_writer_thread;
-        cudaStream_t m_gel_stream;
-        cudaEvent_t m_update_complete_event;
-        dim3 m_blockDim;
+    dim3 m_blockDim;
 	dim3 m_gridDim_1;
 	dim3 m_gridDim0;
 	dim3 m_gridDim1;

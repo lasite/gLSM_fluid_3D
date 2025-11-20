@@ -289,9 +289,6 @@ __global__ void calElementPropertiesD(double3* rn, double3* rm, double3* rm_loc,
 	}
 	bodycenter /= 8;
 	rm[gi] = bodycenter;
-	//if (xi == 0 && yi == 0 && zi == 0) {
-	//	printf("%f, %f, %f\n", rm[gi].x, rm[gi].y, rm[gi].z);
-	//}
 #pragma unroll
 	for (int i = 0; i < 8; i++) {
 		node[i] -= bodycenter;
@@ -537,9 +534,6 @@ __global__ void calElementPropertiesD(double3* rn, double3* rm, double3* rm_loc,
 		wmp[gi] = wm[gi];
 		wm[gi] = gp->dx * gp->dy * gp->dz * gp->FA0 / vol;
 	}
-	//if (xi == 1 && yi == 1 && zi == 1) {
-	//	printf("%f, %f\n", wmp[gi], wm[gi]);
-	//}
 }
 
 __global__ void calPressureD(double* pm, double* vm, double* wm, GelParams* gp)
@@ -629,16 +623,9 @@ __global__ void calNodesVelocityD(double3* rn, double3* ven, double3* ves, doubl
 
 	f1n *= pow(gp->dx * gp->dy * gp->dz, 1 / 3) * gp->C0 / 12.;
 	f2n /= 4.;
-	//if (xi == 1 && yi == 1 && zi == 1) {
-	//	printf("%f, %f, %f\n", Fn[gi].x, Fn[gi].y, Fn[gi].z);
-	//}
 	Fn[gi] = f1n + f2n;
 	ven[gi] = Mn * Fn[gi];
 	ves[gi] = -wn * ven[gi] / (1 - wn);
-	//if (xi == 1 && yi == 1 && zi == 1) {
-	//	printf("%f, %f, %f\n", ves[gi].x, ves[gi].y, ves[gi].z);
-	//}
-	//Fn[gi] = make_double3(0, 0, 0);
 }
 
 __global__ void calInternalNodesPositionD(double3* rn, double3* ven, GelParams* gp)
@@ -654,9 +641,6 @@ __global__ void calInternalNodesPositionD(double3* rn, double3* ven, GelParams* 
 	}
 	int gi = get_index(xi, yi, zi, 2, LX, LY);
 	rn[gi] += gp->dtx * ven[gi];
-	//if (xi == 1 && yi == 1 && zi == 1) {
-	//	printf("%f, %f, %f\n", rn[gi].x, rn[gi].y, rn[gi].z);
-	//}
 }
 
 __global__ void calServiceNodesPositionD(double3* rn, int* map_node, GelParams* gp)
@@ -675,9 +659,6 @@ __global__ void calServiceNodesPositionD(double3* rn, int* map_node, GelParams* 
 	int gi1 = get_index(xi + gp->rn_offset[node_type].x, yi + gp->rn_offset[node_type].y, zi + gp->rn_offset[node_type].z, 2, LX, LY);
 	int gi2 = get_index(xi + 2 * gp->rn_offset[node_type].x, yi + 2 * gp->rn_offset[node_type].y, zi + 2 * gp->rn_offset[node_type].z, 2, LX, LY);
 	rn[gi] = 2 * rn[gi1] - rn[gi2];
-	//if (xi == 0 && yi == 0 && zi == 0) {
-	//	printf("%f, %f, %f\n", rn[gi].x, rn[gi].y, rn[gi].z);
-	//}
 }
 
 __global__ void calTermsD(double* T0, double* T1, double* T2, double* wm, double* wmp, double3* ven, double3* nmSm, double* volume, double3* rm_loc, double* un_norm, double* um_norm, double3* rm, GelParams* gp)
@@ -750,10 +731,6 @@ __global__ void calTermsD(double* T0, double* T1, double* T2, double* wm, double
 	double3 dum = (um_m * (a_add2 - a_sub2) + (um_add ^ a_sub2) - (um_sub ^ a_add2)) / a_addsub;
 	double3 d2um = 2 * ((um_add ^ a_sub) + (um_sub ^ a_add) - um_m * (a_add + a_sub)) / a_addsub;
 	T2[gi] = -(dwm * dum) + (1 - wm_m) * (d2um.x + d2um.y + d2um.z);
-	//if (xi == 1 && yi == 1 && zi == 1) {
-	//	//printf("%f, %f, %f\n", T0[gi], T1[gi], T2[gi]);
-	//	printf("%f, %f, %f\n", wm_m, wmp[gi], gp->dtx);
-	//}
 }
 
 __global__ void calChemD(double* vm, double* um, double* wm, double* T0, double* T1, double* T2, double3* rm, int time, GelParams* gp)
@@ -800,9 +777,6 @@ __global__ void calChemD(double* vm, double* um, double* wm, double* T0, double*
 	k4_um = gp->dt * (-dum * (T0[gi] + k3_vm) + (T1[gi] + k3_um) + (T2[gi] + k3_um) + fu(dum + k3_um, dvm + k3_vm, dwm, I));
 	vm[gi] += (k1_vm + 2 * k2_vm + 2 * k3_vm + k4_vm) / 6;
 	um[gi] += (k1_um + 2 * k2_um + 2 * k3_um + k4_um) / 6;
-	//if (xi == 1 && yi == 1 && zi == 1) {
-	//	printf("%f, %f\n", vm[gi], um[gi]);
-	//}
 }
 
 __global__ void calChemBoundaryD(double* um, double* um_norm, double* vm, double* vm_norm, double* wm, int* map_element, int time, GelParams* gp)
@@ -824,17 +798,8 @@ __global__ void calChemBoundaryD(double* um, double* um_norm, double* vm, double
 	int gi1 = get_index(xi + gp->um_offset_noflux[element_type].x, yi + gp->um_offset_noflux[element_type].y, zi + gp->um_offset_noflux[element_type].z, 1, LX, LY);
 	um[gi] = um[gi1];
 	vm[gi] = vm[gi1];
-	//if (element_type == 1) {
-	//	um[gi] = 0.4;
-	//}
-	//if (xi > 28 && xi < 32) {
-	//	um[gi] = 0.4;
-	//}
 	um_norm[gi] = um[gi] / (1 - wm[gi]);
 	vm_norm[gi] = vm[gi] / (1 - wm[gi]);
-	//if (xi == 1 && yi == 1 && zi == 1) {
-	//	printf("%f, %f\n", vm_norm[gi], um_norm[gi]);
-	//}
 }
 
 __global__ void calUnnormD(double* un_norm, double* um_norm, double* vn_norm, double* vm_norm, GelParams* gp)
@@ -863,7 +828,4 @@ __global__ void calUnnormD(double* un_norm, double* um_norm, double* vn_norm, do
 	}
 	un_norm[get_index(xi, yi, zi, 2, LX, LY)] = dun_norm / 8;
 	vn_norm[get_index(xi, yi, zi, 2, LX, LY)] = dvn_norm / 8;
-	//if (xi == 1 && yi == 1 && zi == 1) {
-	//	printf("%f, %f\n", un_norm[get_index(xi, yi, zi, 2, LX, LY)], vn_norm[get_index(xi, yi, zi, 2, LX, LY)]);
-	//}
 }

@@ -2,6 +2,8 @@
 #include <thread>
 #include <cuda_runtime.h>
 
+#include "coupling.h"
+
 struct FluidParams {
     int3  c[19];
     float w[19];
@@ -21,15 +23,15 @@ struct FluidParams {
 
 class Fluid {
 public:
-    Fluid(int3 fluidSize, int time);
+    Fluid(int3 fluidSize, int time, Coupler* coupler);
     ~Fluid();
     void _initialize(int time);
-    void update(long long int solverIterations);
+    void stepVelocity(long long int iter);
+    void stepConcentration();
     void _finalize();
-    void writeFiles(double time);
-    void convectionAndDiffusion();
-    cudaStream_t stream() const;
-protected:
+    void writeFiles(int iter);
+
+public:
     void allocateHostStorage();
     void allocateDeviceStorage();
     void freeHostMemory();
@@ -59,6 +61,7 @@ public:  // data
     FluidParams* d_fp;
 public:
     // params
+    Coupler* coupler;
     int3 fluidSize;
     int df;
     float dt;
@@ -66,13 +69,12 @@ public:
     int Nd;
     float dt_fluid;
     int Nsub;
+    float* d_A;
     float niu;
     float dx_fluid;
-    cudaStream_t fluid_stream;
-    cudaStream_t transfer_stream;
-    cudaEvent_t copy_trigger_event;
-    cudaEvent_t copy_ready_event;
     std::thread file_writer_thread;
+    cudaStream_t fluid_stream;
     int threads;
     int blocksN;
+    int blocksM;
 };

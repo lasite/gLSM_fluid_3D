@@ -29,25 +29,23 @@ int main(int argc, char** argv)
     gels.push_back(gel1);
     gels.push_back(gel2);
 
-    Fluid* fluid = new Fluid(fluidSize, startTime);
-    Coupler* coupler = new Coupler(gels, fluid);
+    Coupler* coupler = new Coupler(gels);
+    Fluid* fluid = new Fluid(fluidSize, startTime, coupler);
 
-    for (long long int solverIterations = 0; solverIterations <= runstep; ++solverIterations)
+    for (int iter = 0; iter <= runstep; ++iter)
     {
         for (auto g : gels) {
-            g->update(solverIterations);
-            g->recordUpdateCompleteEvent();
+            g->stepElasticity(iter);
+            g->stepChemistry(iter);
         }
         coupler->packFromGels();
-        coupler->transferConcentration();
-        for (int kk = 0; kk < fluid->Nsub; kk++) {
-        //for (int kk = 0; kk < 1; kk++) {
-            coupler->update(solverIterations);
-            fluid->update(solverIterations);
-        }
-        fluid->convectionAndDiffusion();
-        /*coupler->applyGelRepulsion();*/
+        fluid->stepVelocity(iter);
+        fluid->stepConcentration();
         coupler->scatterToGels();
+        for (auto g : gels) {
+            g->writeFiles(iter);
+        }
+        fluid->writeFiles(iter);
     }
     delete fluid;
     for (auto g : gels)

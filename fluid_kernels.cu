@@ -3,6 +3,7 @@
 #include <device_launch_parameters.h>
 #include <cmath>
 #include "fluid_kernels.cuh"
+using namespace std;
 
 __device__ static float3 operator+(float3 a, float3 b)
 {
@@ -78,9 +79,6 @@ __global__  void k_set_force(float3* F, FluidParams* fp) {
 	if (i < fp->N) {
 		F[i] = fp->F_const;
 	}
-	//if (i == 100) {
-	//	printf("%f, %f, %f\n", F[i].x, F[i].y, F[i].z);
-	//}
 }
 
 __global__  void k_init(float* f, float* rho, float3* u, float* c1, float* c2, FluidParams* fp) {
@@ -94,9 +92,6 @@ __global__  void k_init(float* f, float* rho, float3* u, float* c1, float* c2, F
 #pragma unroll
 	for (int q = 0; q < 19; ++q) {
 		f[i + q * (size_t)fp->N] = fp->w[q];
-		//if (i == 0) {
-		//	printf("%f\n", fp->w[q]);
-		//}
 	}
 }
 
@@ -110,15 +105,9 @@ __global__  void k_macros(float* f, float* rho, float3* u, float3* F, FluidParam
 		float fi = f[i + q * (size_t)fp->N];
 		rh += fi;
 		s += fi * fp->c[q];
-		//if (i == 100) {
-		//	printf("%d, %d, %d, %f\n", fp->c[q].x, fp->c[q].y, fp->c[q].z, fi);
-		//}
 	}
 	rho[i] = rh;
 	u[i] = (s + 0.5f * F[i]) / rh;
-	//if (i == 100) {
-	//	printf("%f, %f, %f, %f\n", u[i].x, u[i].y, u[i].z, rho[i]);
-	//}
 }
 
 __global__  void k_zero(float3* a, FluidParams* fp) {
@@ -173,9 +162,6 @@ __global__  void k_vec_add(float3* A, float3* B, float3* C, FluidParams* fp) {
 	int i = blockDim.x * blockIdx.x + threadIdx.x;
 	if (i < fp->N)
 		C[i] = A[i] + B[i];
-	//if (i == 100) {
-	//	printf("%f, %f, %f\n", C[i].x, C[i].y, C[i].z);
-	//}
 }
 
 __device__ __forceinline__ float dot3(const float3 a, const float3 b) {
@@ -248,7 +234,188 @@ __global__ void k_convection_diffusion(float3* d_u, float* d_c1, float* d_c2, Fl
 	const float diff = fp->D * dot3(sec, inv_h2);
 
 	d_c2[idx] = c + fp->dt * (conv + diff);
-	//if (i == 100) {
-	//	printf("%f\n", d_c2[idx]);
-	//}
+}
+
+__global__ void k_ibm_interpolate_velocity(float3* u, float3* Ul, float3* lag, FluidParams* fp) {
+	int l = blockDim.x * blockIdx.x + threadIdx.x;
+	if (l >= fp->M) return;
+
+	const float h = fp->h;
+	const int Nx = fp->L.x, Ny = fp->L.y, Nz = fp->L.z;
+
+	const float gx = lag[l].x / h;
+	const float gy = lag[l].y / h;
+	const float gz = lag[l].z / h;
+
+	const int ix = (int)floor(gx);
+	const int iy = (int)floor(gy);
+	const int iz = (int)floor(gz);
+
+	float3 ul = make_float3(0.0, 0.0, 0.0);
+	float wsum = 0.0;
+
+	for (int ii = max(0, ix - 1); ii <= min(Nx - 1, ix + 2); ++ii) {
+		const float phix = delta4(gx - (float)ii);
+		for (int jj = max(0, iy - 1); jj <= min(Ny - 1, iy + 2); ++jj) {
+			const float phiy = delta4(gy - (float)jj);
+			for (int kk = max(0, iz - 1); kk <= min(Nz - 1, iz + 2); ++kk) {
+				const float phiz = delta4(gz - (float)kk);
+				const float w = phix * phiy * phiz;
+				const int id = id3(ii, jj, kk, Nx, Ny);
+				ul += u[id] * w;
+				wsum += w;
+			}
+		}
+	}
+	if (wsum > 0.0f) {
+		Ul[l] = ul / wsum;
+	}
+	else {
+		Ul[l] = make_float3(0.f, 0.f, 0.f);
+	}
+}
+
+__global__ void k_scale_negbeta(float3* Ul, float3* Vl, float3* Fl, float beta_eff, FluidParams* fp) {
+	int l = blockDim.x * blockIdx.x + threadIdx.x;
+	if (l >= fp->M) return;
+	//Fl[l] = fp->beta * (Vl[l] - Ul[l]);
+	Fl[l] = beta_eff * (Vl[l] - Ul[l]);
+}
+
+__global__ void k_ibm_spread_forces(float3* F_ibm, float3* Fl, float3* lag, float* dA, FluidParams* fp) {
+	int l = blockDim.x * blockIdx.x + threadIdx.x;
+	if (l >= fp->M) return;
+
+	const float h = fp->h;
+	const int Nx = fp->L.x, Ny = fp->L.y, Nz = fp->L.z;
+
+	const float gx = lag[l].x / h;
+	const float gy = lag[l].y / h;
+	const float gz = lag[l].z / h;
+
+	const int ix = (int)floor(gx);
+	const int iy = (int)floor(gy);
+	const int iz = (int)floor(gz);
+
+	const float3 fL = Fl[l];
+
+	float wsum = 0.0;
+	for (int ii = max(0, ix - 1); ii <= min(Nx - 1, ix + 2); ++ii) {
+		const float phix = delta4(gx - (float)ii);
+		for (int jj = max(0, iy - 1); jj <= min(Ny - 1, iy + 2); ++jj) {
+			const float phiy = delta4(gy - (float)jj);
+			for (int kk = max(0, iz - 1); kk <= min(Nz - 1, iz + 2); ++kk) {
+				const float phiz = delta4(gz - (float)kk);
+				wsum += phix * phiy * phiz;
+			}
+		}
+	}
+	if (wsum == 0.0) return;
+
+	const float inv_h3 = 1.0 / (h * h * h);
+	const float scale = 1 * inv_h3 / wsum;
+
+	for (int ii = max(0, ix - 1); ii <= min(Nx - 1, ix + 2); ++ii) {
+		const float phix = delta4(gx - (float)ii);
+		for (int jj = max(0, iy - 1); jj <= min(Ny - 1, iy + 2); ++jj) {
+			const float phiy = delta4(gy - (float)jj);
+			for (int kk = max(0, iz - 1); kk <= min(Nz - 1, iz + 2); ++kk) {
+				const float phiz = delta4(gz - (float)kk);
+				const float w = phix * phiy * phiz * scale;
+				const int id = id3(ii, jj, kk, Nx, Ny);
+				atomicAdd(&F_ibm[id].x, fL.x * w);
+				atomicAdd(&F_ibm[id].y, fL.y * w);
+				atomicAdd(&F_ibm[id].z, fL.z * w);
+			}
+		}
+	}
+
+}
+
+__global__ void k_ibm_sample_concentration(float* c, float* Cl, float3* lag, FluidParams* fp) {
+	int l = blockDim.x * blockIdx.x + threadIdx.x;
+	if (l >= fp->M) return;
+
+	const float h = fp->h;
+	const int Nx = fp->L.x, Ny = fp->L.y, Nz = fp->L.z;
+
+	const float gx = lag[l].x / h;
+	const float gy = lag[l].y / h;
+	const float gz = lag[l].z / h;
+
+	const int ix = (int)floor(gx);
+	const int iy = (int)floor(gy);
+	const int iz = (int)floor(gz);
+
+	float cl = 0.0f;
+	float wsum = 0.0f;
+
+	for (int ii = max(0, ix - 1); ii <= min(Nx - 1, ix + 2); ++ii) {
+		const float phix = delta4(gx - (float)ii);
+		for (int jj = max(0, iy - 1); jj <= min(Ny - 1, iy + 2); ++jj) {
+			const float phiy = delta4(gy - (float)jj);
+			for (int kk = max(0, iz - 1); kk <= min(Nz - 1, iz + 2); ++kk) {
+				const float phiz = delta4(gz - (float)kk);
+				const float w = phix * phiy * phiz;
+				const int id = id3(ii, jj, kk, Nx, Ny);
+				cl += c[id] * w;
+				wsum += w;
+			}
+		}
+	}
+	if (wsum > 0.0f) {
+		Cl[l] = cl / wsum;
+	}
+	else {
+		Cl[l] = 0.0f;
+	}
+}
+
+__global__ void k_ibm_spread_concentration(float* c, float* Dl, float3* lag, float* dA, FluidParams* fp) {
+	int l = blockDim.x * blockIdx.x + threadIdx.x;
+	if (l >= fp->M) return;
+
+	const float h = fp->h;
+	const int Nx = fp->L.x, Ny = fp->L.y, Nz = fp->L.z;
+
+	const float gx = lag[l].x / h;
+	const float gy = lag[l].y / h;
+	const float gz = lag[l].z / h;
+
+	const int ix = (int)floor(gx);
+	const int iy = (int)floor(gy);
+	const int iz = (int)floor(gz);
+
+	const float dL = Dl[l];
+
+	float wsum = 0.0f;
+	for (int ii = max(0, ix - 1); ii <= min(Nx - 1, ix + 2); ++ii) {
+		const float phix = delta4(gx - (float)ii);
+		for (int jj = max(0, iy - 1); jj <= min(Ny - 1, iy + 2); ++jj) {
+			const float phiy = delta4(gy - (float)jj);
+			for (int kk = max(0, iz - 1); kk <= min(Nz - 1, iz + 2); ++kk) {
+				const float phiz = delta4(gz - (float)kk);
+				wsum += phix * phiy * phiz;
+				const int id = id3(ii, jj, kk, Nx, Ny);
+				c[id] = 0;
+			}
+		}
+	}
+	if (wsum == 0.0f) return;
+
+	const float inv_h3 = 1.0f / (h * h * h);
+	const float scale = 1 * inv_h3 / wsum;
+
+	for (int ii = max(0, ix - 1); ii <= min(Nx - 1, ix + 2); ++ii) {
+		const float phix = delta4(gx - (float)ii);
+		for (int jj = max(0, iy - 1); jj <= min(Ny - 1, iy + 2); ++jj) {
+			const float phiy = delta4(gy - (float)jj);
+			for (int kk = max(0, iz - 1); kk <= min(Nz - 1, iz + 2); ++kk) {
+				const float phiz = delta4(gz - (float)kk);
+				const float w = phix * phiy * phiz * scale;
+				const int id = id3(ii, jj, kk, Nx, Ny);
+				atomicAdd(&c[id], dL * w);
+			}
+		}
+	}
 }

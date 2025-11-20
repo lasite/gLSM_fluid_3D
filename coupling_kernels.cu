@@ -54,95 +54,6 @@ __device__ static int id3(int x, int y, int z, int Nx, int Ny) {
 	return x + y * Nx + z * Nx * Ny;
 }
 
-__global__ void k_ibm_interpolate_velocity(float3* u, float3* Ul, float3* lag, CouplerParams* cp) {
-	int l = blockDim.x * blockIdx.x + threadIdx.x;
-	if (l >= cp->M) return;
-
-	const float h = cp->h;
-	const int Nx = cp->L.x, Ny = cp->L.y, Nz = cp->L.z;
-
-	const float gx = lag[l].x / h;
-	const float gy = lag[l].y / h;
-	const float gz = lag[l].z / h;
-
-	const int ix = (int)floor(gx);
-	const int iy = (int)floor(gy);
-	const int iz = (int)floor(gz);
-
-    float3 ul = make_float3(0.0, 0.0, 0.0);
-    float wsum = 0.0;
-
-	for (int ii = max(0, ix - 1); ii <= min(Nx - 1, ix + 2); ++ii) {
-		const float phix = delta4(gx - (float)ii);
-		for (int jj = max(0, iy - 1); jj <= min(Ny - 1, iy + 2); ++jj) {
-			const float phiy = delta4(gy - (float)jj);
-			for (int kk = max(0, iz - 1); kk <= min(Nz - 1, iz + 2); ++kk) {
-				const float phiz = delta4(gz - (float)kk);
-				const float w = phix * phiy * phiz;
-				const int id = id3(ii, jj, kk, Nx, Ny);
-				ul += u[id] * w;
-				wsum += w;
-			}
-		}
-	}
-    if (wsum > 0.0f) {
-            Ul[l] = ul / wsum;
-    }
-    else {
-            Ul[l] = make_float3(0.f, 0.f, 0.f);
-    }
-}
-
-__global__ void k_ibm_sample_concentration(float* c, float* Cl, float3* lag, CouplerParams* cp) {
-	int l = blockDim.x * blockIdx.x + threadIdx.x;
-	if (l >= cp->M) return;
-
-	const float h = cp->h;
-	const int Nx = cp->L.x, Ny = cp->L.y, Nz = cp->L.z;
-
-	const float gx = lag[l].x / h;
-	const float gy = lag[l].y / h;
-	const float gz = lag[l].z / h;
-
-	const int ix = (int)floor(gx);
-	const int iy = (int)floor(gy);
-	const int iz = (int)floor(gz);
-
-    float cl = 0.0f;
-    float wsum = 0.0f;
-
-	for (int ii = max(0, ix - 1); ii <= min(Nx - 1, ix + 2); ++ii) {
-		const float phix = delta4(gx - (float)ii);
-		for (int jj = max(0, iy - 1); jj <= min(Ny - 1, iy + 2); ++jj) {
-			const float phiy = delta4(gy - (float)jj);
-			for (int kk = max(0, iz - 1); kk <= min(Nz - 1, iz + 2); ++kk) {
-				const float phiz = delta4(gz - (float)kk);
-				const float w = phix * phiy * phiz;
-				const int id = id3(ii, jj, kk, Nx, Ny);
-				cl += c[id] * w;
-				wsum += w;
-			}
-		}
-	}
-    if (wsum > 0.0f) {
-            Cl[l] = cl / wsum;
-    }
-    else {
-            Cl[l] = 0.0f;
-    }
-}
-
-__global__ void k_scale_negbeta(float3* Ul, float3* Vl, float3* Fl, float beta_eff, CouplerParams* cp) {
-	int l = blockDim.x * blockIdx.x + threadIdx.x;
-	if (l >= cp->M) return;
-	//Fl[l] = cp->beta * (Vl[l] - Ul[l]);
-	Fl[l] = beta_eff * (Vl[l] - Ul[l]);
-	//if (l == 1) {
-	//	printf("%12f, %12f\n", Vl[l].x, Vl[l].y);
-	//	printf("%12f, %12f\n", Fl[l].x, Fl[l].y);
-	//}
-}
-
 __global__ void k_add_reaction_to_gel(int* bIndex, double3* Fn, double* un_norm, float3* Fl, float* Cl, int M)
 {
 	int l = blockDim.x * blockIdx.x + threadIdx.x;
@@ -156,108 +67,7 @@ __global__ void k_add_reaction_to_gel(int* bIndex, double3* Fn, double* un_norm,
 	Fn[id].y = -(double)f.y;
 	Fn[id].z = -(double)f.z;
 	un_norm[id] = (double)c;
-	//if (l == 0) {
-	//	printf("%f, %f， %f\n", Fl[l].x, Fl[l].y, Fl[l].z);
-	//}
 }
-
-__global__ void k_ibm_spread_forces(float3* F_ibm, float3* Fl, float3* lag, float* dA, CouplerParams* cp) {
-	int l = blockDim.x * blockIdx.x + threadIdx.x;
-	if (l >= cp->M) return;
-
-	const float h = cp->h;
-	const int Nx = cp->L.x, Ny = cp->L.y, Nz = cp->L.z;
-
-	const float gx = lag[l].x / h;
-	const float gy = lag[l].y / h;
-	const float gz = lag[l].z / h;
-
-	const int ix = (int)floor(gx);
-	const int iy = (int)floor(gy);
-	const int iz = (int)floor(gz);
-
-	const float3 fL = Fl[l];
-
-	float wsum = 0.0;
-	for (int ii = max(0, ix - 1); ii <= min(Nx - 1, ix + 2); ++ii) {
-		const float phix = delta4(gx - (float)ii);
-		for (int jj = max(0, iy - 1); jj <= min(Ny - 1, iy + 2); ++jj) {
-			const float phiy = delta4(gy - (float)jj);
-			for (int kk = max(0, iz - 1); kk <= min(Nz - 1, iz + 2); ++kk) {
-				const float phiz = delta4(gz - (float)kk);
-				wsum += phix * phiy * phiz;
-			}
-		}
-	}
-	if (wsum == 0.0) return;
-
-	const float inv_h3 = 1.0 / (h * h * h);
-	const float scale = 1 * inv_h3 / wsum;
-
-	for (int ii = max(0, ix - 1); ii <= min(Nx - 1, ix + 2); ++ii) {
-		const float phix = delta4(gx - (float)ii);
-		for (int jj = max(0, iy - 1); jj <= min(Ny - 1, iy + 2); ++jj) {
-			const float phiy = delta4(gy - (float)jj);
-			for (int kk = max(0, iz - 1); kk <= min(Nz - 1, iz + 2); ++kk) {
-				const float phiz = delta4(gz - (float)kk);
-				const float w = phix * phiy * phiz * scale;
-				const int id = id3(ii, jj, kk, Nx, Ny);
-				atomicAdd(&F_ibm[id].x, fL.x * w);
-				atomicAdd(&F_ibm[id].y, fL.y * w);
-				atomicAdd(&F_ibm[id].z, fL.z * w);
-			}
-		}
-	}
-
-}
-
-__global__ void k_ibm_spread_concentration(float* c, float* Dl, float3* lag, float* dA, CouplerParams* cp) {
-	int l = blockDim.x * blockIdx.x + threadIdx.x;
-	if (l >= cp->M) return;
-
-	const float h = cp->h;
-	const int Nx = cp->L.x, Ny = cp->L.y, Nz = cp->L.z;
-
-	const float gx = lag[l].x / h;
-	const float gy = lag[l].y / h;
-	const float gz = lag[l].z / h;
-
-	const int ix = (int)floor(gx);
-	const int iy = (int)floor(gy);
-	const int iz = (int)floor(gz);
-
-	const float dL = Dl[l];
-
-	float wsum = 0.0f;
-	for (int ii = max(0, ix - 1); ii <= min(Nx - 1, ix + 2); ++ii) {
-		const float phix = delta4(gx - (float)ii);
-		for (int jj = max(0, iy - 1); jj <= min(Ny - 1, iy + 2); ++jj) {
-			const float phiy = delta4(gy - (float)jj);
-			for (int kk = max(0, iz - 1); kk <= min(Nz - 1, iz + 2); ++kk) {
-				const float phiz = delta4(gz - (float)kk);
-				wsum += phix * phiy * phiz;
-			}
-		}
-	}
-	if (wsum == 0.0f) return;
-
-	const float inv_h3 = 1.0f / (h * h * h);
-	const float scale = 1 * inv_h3 / wsum;
-
-	for (int ii = max(0, ix - 1); ii <= min(Nx - 1, ix + 2); ++ii) {
-		const float phix = delta4(gx - (float)ii);
-		for (int jj = max(0, iy - 1); jj <= min(Ny - 1, iy + 2); ++jj) {
-			const float phiy = delta4(gy - (float)jj);
-			for (int kk = max(0, iz - 1); kk <= min(Nz - 1, iz + 2); ++kk) {
-				const float phiz = delta4(gz - (float)kk);
-				const float w = phix * phiy * phiz * scale;
-				const int id = id3(ii, jj, kk, Nx, Ny);
-				atomicAdd(&c[id], dL * w);
-			}
-		}
-	}
-}
-
 
 __device__ __forceinline__ float3 to_float3(const double3 a) {
 	return make_float3(__double2float_rn(a.x),
@@ -280,11 +90,6 @@ __global__ void k_gather_boundary(int* bIndex, double3* rn, double3* vn, double*
 	lag[l] = to_float3(r);
 	Vl[l] = to_float3(v);
 	Cl[l] = __double2float_rn(u);
-	//if (l == 0) {
-	//	printf("%f, %f, %f\n", r.x, r.y, r.z);
-	//	printf("%f, %f, %f\n", v.x, v.y, v.z);
-	//	printf("%f\n", u);
-	//}
 }
 
 __device__ __forceinline__ void atomicAdd_float3(float3* p, const float3 v) {

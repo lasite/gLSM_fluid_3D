@@ -52,11 +52,8 @@ void Fluid::setInitValue()
 
 void Fluid::copyDataToHost()
 {
-cudaEventRecord(copy_trigger_event, fluid_stream);
-cudaStreamWaitEvent(transfer_stream, copy_trigger_event, 0);
-cudaMemcpyAsync(h_u, d_u, sizeof(float3) * N, cudaMemcpyDeviceToHost, transfer_stream);
-cudaMemcpyAsync(h_c1, d_c1, sizeof(float) * N, cudaMemcpyDeviceToHost, transfer_stream);
-cudaEventRecord(copy_ready_event, transfer_stream);
+	cudaMemcpyAsync(h_u, d_u, sizeof(float3) * N, cudaMemcpyDeviceToHost, fluid_stream);
+	cudaMemcpyAsync(h_c1, d_c1, sizeof(float) * N, cudaMemcpyDeviceToHost, fluid_stream);
 }
 
 void Fluid::freeHostMemory()
@@ -81,39 +78,44 @@ void Fluid::freeDeviceMemory()
 
 void Fluid::recordData(int time)
 {
-        if (time % 1 == 0) {
-                ofstream fVelb;
-                string  str_Velb;
-                str_Velb = "Velb" + to_string(time) + ".dat";
-                fVelb.open(str_Velb);
-                ofstream fC1;
-                string str_C1 = "Conc" + to_string(time) + ".dat";
-                fC1.open(str_C1);
-                int gi;
-                for (int zi = 0; zi < fluidSize.z; zi++) {
-                        for (int yi = 0; yi < fluidSize.y; yi++) {
-                                for (int xi = 0; xi < fluidSize.x; xi++) {
-                                        gi = idx3(xi, yi, zi, fluidSize.x, fluidSize.y);
-                                        fVelb << setw(9) << to_string(h_u[gi].x) << "      " << setw(9) << to_string(h_u[gi].y) << "      " << setw(9) << to_string(h_u[gi].z) << "\n";
-                                        fC1 << setw(9) << to_string(h_c1[gi]) << "\n";
-                                }
-                        }
-                }
-                fVelb.close();
-                fC1.close();
-        }
+	if (time % 1 == 0) {
+		ofstream fVelb;
+		string  str_Velb;
+		str_Velb = "Velb" + to_string(time) + ".dat";
+		fVelb.open(str_Velb);
+		ofstream fC1;
+		string str_C1 = "Conc" + to_string(time) + ".dat";
+		fC1.open(str_C1);
+		int gi;
+		for (int zi = 0; zi < fluidSize.z; zi++) {
+			for (int yi = 0; yi < fluidSize.y; yi++) {
+				for (int xi = 0; xi < fluidSize.x; xi++) {
+					gi = idx3(xi, yi, zi, fluidSize.x, fluidSize.y);
+					fVelb << setw(9) << to_string(h_u[gi].x) << "      " << setw(9) << to_string(h_u[gi].y) << "      " << setw(9) << to_string(h_u[gi].z) << "\n";
+					fC1 << setw(9) << to_string(h_c1[gi]) << "\n";
+				}
+			}
+		}
+		fVelb.close();
+		fC1.close();
+	}
 }
 
-void Fluid::writeFiles(double time)
+void Fluid::writeFiles(int iter)
 {
-cudaEventSynchronize(copy_ready_event);
-if (int(time * 1) % 1 == 0) {
-recordData(int(time * 1));
-}
+	int time = int(iter * dt);
+	if (iter % 1000 == 0) {
+		if (file_writer_thread.joinable()) {
+			file_writer_thread.join();
+		}
+		copyDataToHost();
+		file_writer_thread = thread(&Fluid::recordData, this, time);
+	}
 }
 
-Fluid::Fluid(int3 fluidSize, int time):
+Fluid::Fluid(int3 fluidSize, int time, Coupler* coupler):
 fluidSize(fluidSize),
+coupler(coupler),
 h_u(0),
 h_c1(0),
 d_f(0),
@@ -124,16 +126,14 @@ d_u(0),
 d_F(0),
 d_F_ibm(0),
 d_F_tot(0),
-fluid_stream(0),
-transfer_stream(0),
-copy_trigger_event(0),
-copy_ready_event(0)
+d_A(0)
 {
 	dt = 1e-3f;
 	N = fluidSize.x * fluidSize.y * fluidSize.z;
 	Nd = N * 19;
-	threads = 256;
+	threads = coupler->threads;
 	blocksN = (N + threads - 1) / threads;
+	blocksM = coupler->blocksM;
 	h_fp = new FluidParams;
 	memset(h_fp, 0, sizeof(FluidParams));
 	h_fp->dt = dt;
@@ -144,6 +144,7 @@ copy_ready_event(0)
 	h_fp->tau = 0.8f;
 	h_fp->nu = h_fp->cs2 * (h_fp->tau - 0.5f);
 	h_fp->N = N;
+	h_fp->M = coupler->sumGelBoundaryCount;
 	h_fp->L = fluidSize;
 	h_fp->h = 0.5f;
 	h_fp->dx = 1;
@@ -151,10 +152,10 @@ copy_ready_event(0)
 	h_fp->dz = 1;
 	h_fp->D = 1;
 	niu = 1e-6f;
-	dx_fluid = 40e-6 * h_fp->h;
+	dx_fluid = 40e-6f * h_fp->h;
 	dt_fluid = (h_fp->tau - 0.5f) * dx_fluid * dx_fluid / (3 * niu);
 	Nsub = int(dt / dt_fluid);
-	h_fp->beta = 0.01;
+	h_fp->beta = 0.01f;
 	int3 c[19] = {
 	{0,0,0},
 	{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1},
@@ -183,55 +184,47 @@ Fluid::~Fluid()
 
 void Fluid::_initialize(int time)
 {
-allocateHostStorage();
-allocateDeviceStorage();
-cudaStreamCreate(&fluid_stream);
-cudaStreamCreateWithFlags(&transfer_stream, cudaStreamNonBlocking);
-cudaEventCreateWithFlags(&copy_trigger_event, cudaEventDisableTiming);
-cudaEventCreateWithFlags(&copy_ready_event, cudaEventDisableTiming);
-copyDataToDevice();
-setInitValue();
+	allocateHostStorage();
+	allocateDeviceStorage();
+	cudaStreamCreate(&fluid_stream);
+	copyDataToDevice();
+	setInitValue();
 }
 
-cudaStream_t Fluid::stream() const
+void Fluid::stepConcentration()
 {
-        return fluid_stream;
+	k_ibm_sample_concentration << <blocksM, threads, 0, fluid_stream >> > (d_c1, coupler->d_Dl_all_, coupler->d_lag_all_, d_fp);
+	swap(coupler->d_Cl_all_, coupler->d_Dl_all_);
+	k_ibm_spread_concentration << <blocksM, threads, 0, fluid_stream >> > (d_c1, coupler->d_Dl_all_, coupler->d_lag_all_, d_A, d_fp);
+    k_convection_diffusion << <blocksN, threads, 0, fluid_stream >> > (d_u, d_c1, d_c2, d_fp);
+    swap(d_c1, d_c2);
 }
 
-void Fluid::convectionAndDiffusion()
+void Fluid::stepVelocity(long long int iter)
 {
-        k_convection_diffusion << <blocksN, threads, 0, fluid_stream >> > (d_u, d_c1, d_c2, d_fp);
-        swap(d_c1, d_c2);
-}
-
-void Fluid::update(long long int solverIterations)
-{
-	double time = solverIterations * dt;
-	k_set_force << <blocksN, threads, 0, fluid_stream >> > (d_F, d_fp);
-	k_vec_add << <blocksN, threads, 0, fluid_stream >> > (d_F, d_F_ibm, d_F_tot, d_fp);
-	k_macros << <blocksN, threads, 0, fluid_stream >> > (d_f, d_rho, d_u, d_F_tot, d_fp);
-	k_collide << <blocksN, threads, 0, fluid_stream >> > (d_f, d_fpost, d_rho, d_u, d_F_tot, d_fp);
-	k_stream_bounce << <blocksN, threads, 0, fluid_stream >> > (d_fpost, d_fnext, d_fp);
-	swap(d_f, d_fnext);
-	k_zero << <blocksN, threads, 0, fluid_stream >> > (d_F_ibm, d_fp);
-	if (solverIterations % 1000 == 0) {
-		if (file_writer_thread.joinable()) {
-			file_writer_thread.join();
-		}
-		copyDataToHost();
-		file_writer_thread = thread(mem_fn(&Fluid::writeFiles), this, time);
+	float ramp = fminf(1, (iter + 1) / 2000.0f);
+	float beta_eff = h_fp->beta * ramp;
+	double time = iter * dt;
+	for (int kk = 0; kk < Nsub; kk++) {
+		k_set_force << <blocksN, threads, 0, fluid_stream >> > (d_F, d_fp);
+		k_ibm_interpolate_velocity << <blocksM, threads, 0, fluid_stream >> > (d_u, coupler->d_Ul_all_, coupler->d_lag_all_, d_fp);
+		k_scale_negbeta << <blocksM, threads, 0, fluid_stream >> > (coupler->d_Ul_all_, coupler->d_Vl_all_, coupler->d_Fl_all_, beta_eff, d_fp);
+		k_ibm_spread_forces << <blocksM, threads, 0, fluid_stream >> > (d_F_ibm, coupler->d_Fl_all_, coupler->d_lag_all_, d_A, d_fp);
+		k_vec_add << <blocksN, threads, 0, fluid_stream >> > (d_F, d_F_ibm, d_F_tot, d_fp);
+		k_macros << <blocksN, threads, 0, fluid_stream >> > (d_f, d_rho, d_u, d_F_tot, d_fp);
+		k_collide << <blocksN, threads, 0, fluid_stream >> > (d_f, d_fpost, d_rho, d_u, d_F_tot, d_fp);
+		k_stream_bounce << <blocksN, threads, 0, fluid_stream >> > (d_fpost, d_fnext, d_fp);
+		swap(d_f, d_fnext);
+		k_zero << <blocksN, threads, 0, fluid_stream >> > (d_F_ibm, d_fp);
 	}
 }
 
 void Fluid::_finalize()
 {
-if (file_writer_thread.joinable()) {
-file_writer_thread.join();
-}
-cudaStreamDestroy(fluid_stream);
-cudaStreamDestroy(transfer_stream);
-cudaEventDestroy(copy_trigger_event);
-cudaEventDestroy(copy_ready_event);
-freeHostMemory();
-freeDeviceMemory();
+	if (file_writer_thread.joinable()) {
+		file_writer_thread.join();
+	}
+	cudaStreamDestroy(fluid_stream);
+	freeHostMemory();
+	freeDeviceMemory();
 }
