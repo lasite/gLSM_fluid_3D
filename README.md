@@ -32,11 +32,12 @@ The surrounding fluid is advanced on an Eulerian lattice via an LBM collide/stre
 ## Codebase Layout
 | File / Directory | Description |
 | ---------------- | ----------- |
-| `gel.cpp` | Program entry point. Configures parameter sweeps, prepares output directories, launches `GelSystem` updates, and manages checkpoint/restart files. |
-| `gelSystem.h` / `gelSystem.cu` | Host-side orchestration of the coupled gel–fluid solver. Handles memory allocation on CPU/GPU, maintains simulation clocks, triggers CUDA kernels, and streams diagnostic output. |
-| `gel_kernel.cu` / `gel_kernel.cuh` | CUDA kernel implementations and declarations. Includes routines for chemistry diffusion/reaction, mechanical updates, IBM interpolation/spreading, and the LBM collide/stream steps. |
-| `gelParams.h` | Parameter structures shared between host and device code. Encapsulates gel material constants, IBM coefficients, lattice geometry, and numerical control flags. |
-| `gLSM_fluid_3D.sln` / `gLSM_fluid_3D.vcxproj` | Visual Studio + CUDA project for building on Windows systems. |
+| `sim.cpp` | Program entry point that instantiates two gels, a `Coupler`, and the surrounding `Fluid`. Runs the top-level time-stepping loop that alternates gel mechanics/chemistry updates, immersed boundary packing/scattering, and fluid LBM steps. |
+| `gel.h` / `gel.cu` | Gel data model and update routines. Manages host/device buffers for nodal positions, forces, chemistry fields, and boundary indices; launches CUDA kernels defined in `gel_kernels.cu[h]`; and writes gel-specific outputs (`gel<id>rnXXXX.dat`, etc.). |
+| `fluid.h` / `fluid.cu` | LBM-based fluid simulator. Owns distribution functions, macroscopic fields, and immersed boundary force buffers; advances velocity and concentration; and writes `VelbXXXX.dat` / `ConcXXXX.dat` snapshots. |
+| `coupling.h` / `coupling.cu` | Immersed boundary glue between gels and fluid. Builds packed Lagrangian data, accumulates force/velocity exchanges, and exposes GPU buffers to both subsystems. |
+| `*_kernels.cu` / `*_kernels.cuh` | CUDA kernels and declarations for gel mechanics/chemistry, fluid collide/stream, and coupling interpolation/spreading operations. |
+| `gLSM_fluid_3D.sln` / `gLSM_fluid_3D.vcxproj` | Visual Studio + CUDA project files for Windows builds. |
 
 The repository currently ships only source and project files; tests and post-processing scripts are not included.
 
@@ -49,13 +50,14 @@ The repository currently ships only source and project files; tests and post-pro
 3. Build the `Release` configuration. Output binaries are placed next to the solution file.
 
 ### Linux (command-line)
-A CMake file is not provided, but an equivalent build can be scripted using `nvcc`:
+A CMake file is not provided. You can build the standalone executable with `nvcc` by compiling the entry point, subsystem sources, and their kernels:
 ```bash
 nvcc -O3 -std=c++17 -arch=sm_70 \
-     gel.cpp gelSystem.cu gel_kernel.cu \
+     sim.cpp gel.cu fluid.cu coupling.cu \
+     gel_kernels.cu fluid_kernels.cu coupling_kernels.cu \
      -o gLSM_fluid_3D
 ```
-Ensure `CUDA_HOME` is set and the host compiler supports C++17. You may need to add `-Xcompiler -fopenmp` if using OpenMP features (currently unused by the code).
+If you see errors about `cudaSetDevice(1)`, switch the hard-coded device in `sim.cpp` to `0` or any available device ID. Ensure `CUDA_HOME` is set and the host compiler supports C++17.
 
 ### Common Requirements
 - CUDA-capable GPU with sufficient device memory to store gel + fluid arrays (hundreds of MB for typical grids).
@@ -65,91 +67,89 @@ Ensure `CUDA_HOME` is set and the host compiler supports C++17. You may need to 
 ---
 
 ## Execution Pipeline
-The high-level simulation loop mirrors the following sequence:
+The high-level simulation loop in `sim.cpp` mirrors the following sequence:
 
 1. **Initialization**
-   - `GelSystem` constructor records grid sizes, time step counts, and sweep indices supplied by `gel.cpp`.
-   - `_initialize` allocates host/device buffers, zeros or seeds them, and uploads parameter structs to constant memory.
-   - Initial gel geometry and chemistry fields are populated, typically from analytic formulas embedded in the code.
+   - Two `Gel` instances are built with user-chosen sizes, positions, and types.
+   - A `Coupler` is created to aggregate gel boundary data and expose buffers to the fluid.
+   - A `Fluid` object initializes the LBM lattice, distribution functions, and immersed boundary force arrays.
 
-2. **Main Time Step (`GelSystem::update`)**
-   - *Chemistry:* `calChemD` advances reaction–diffusion equations on the gel mesh.
-   - *Geometry & Mechanics:* Kernels such as `calNodesGeometryD`, `calNodesVelocityD`, and `calNodesForceD` refresh deformation metrics and nodal forces.
-   - *Immersed Boundary Sub-iterations:* For `Nsub` cycles the code
-     1. Packs Lagrangian boundary data into `d_lag`/`d_Vl`.
-     2. Interpolates Eulerian velocities to the gel nodes (`k_ibm_interp`).
-     3. Updates gel mechanics with the interpolated velocities and computes new forces.
-     4. Spreads forces back to the fluid grid (`k_ibm_spread`).
-   - *Fluid Step:* Executes the LBM collide (`k_collide`) and stream/bounce-back (`k_stream_bounce`) kernels, using the IBM force density as an external input.
-   - *Diagnostics:* On configurable intervals, data are copied to host pinned buffers and a writer thread dumps `.dat` files.
+2. **Main Time Step (`for` loop in `main`)**
+   - *Gel updates:* Each gel calls `stepElasticity` then `stepChemistry`, advancing mechanical and reaction–diffusion fields on its Lagrangian mesh.
+   - *Coupling pack:* `Coupler::packFromGels` collects boundary positions/forces into contiguous device buffers.
+   - *Fluid step:* `Fluid::stepVelocity` and `Fluid::stepConcentration` execute collide/stream and scalar advection/diffusion substeps, incorporating IBM forces.
+   - *Coupling scatter:* `Coupler::scatterToGels` interpolates updated fluid velocities back to the gel boundaries.
+   - *Diagnostics:* Every 1000 iterations, gels and fluid copy data to the host and spawn writer threads to dump `.dat` snapshots.
 
 3. **Finalization**
-   - Once the requested number of steps (`runstep`) is reached, CUDA resources are freed, file handles closed, and statistics printed.
+   - After the configured `runstep` iterations, host/device resources are freed and writer threads are joined.
 
 ---
 
 ## Runtime Configuration
-Current configuration is hard-coded inside `gel.cpp` and `gelParams.h`. Important knobs include:
+Current configuration is hard-coded inside `sim.cpp`, `gel.cu`, and `fluid.cu`. Important knobs include:
 
-- **Grid Dimensions:** `Nx`, `Ny`, `Nz` define the fluid lattice. Gel discretization counts (`m_Numfilaments`, `m_NumNodes`) are derived from parameter structs.
-- **Time Control:** `runstep`, `Nsub`, and `dt` determine the macro time step length and number of immersed boundary subcycles.
-- **Parameter Sweeps:** The main program iterates `multiRun`, `multiB`, `multiC`, etc., changing material constants between runs and writing to distinct directories.
-- **Restart Flags:** `setGoonValue` attempts to resume from checkpoint files if `goon` is enabled.
+- **Grid Dimensions:** `fluidSize` in `sim.cpp` controls the Eulerian lattice; `gelSize` and `gelPosition` determine each gel’s discretization and placement.
+- **Time Control:** `runstep` in `sim.cpp` sets the number of macro iterations. Gel and fluid time steps (`m_dt` and `dt`) are fixed to `1e-3`, and the fluid internally computes `Nsub` immersed boundary substeps from its viscosity.
+- **Material Parameters:** `GelParams` and `FluidParams` structs (allocated in constructors) store reaction kinetics, lattice weights, and diffusion coefficients. They are currently initialized with constants in code.
+- **Device Selection:** `cudaSetDevice(1)` in `sim.cpp` assumes a second GPU; change to `0` if only one device is present.
 
-To externalize configuration, consider reading JSON or INI files and populating `params`/`p` structures prior to constructing `GelSystem`.
+To externalize configuration, consider reading JSON or INI files and populating these parameters before constructing `Gel`, `Coupler`, and `Fluid` instances.
 
 ---
 
 ## Key Data Structures
 ### Gel-related
-- `m_hum`, `m_hvm`, `m_hwm` (host) and `m_dum`, `m_dvm`, `m_dwm` (device) store per-node chemistry fields.
-- `m_hrn`, `m_hVeln`, `m_hFn` and their device counterparts hold geometry, velocity, and force vectors.
-- `m_hfilament` and `m_dfilament` represent filament configurations used to compute active stresses.
+- `m_hum`, `m_hvm`, `m_hwm` (host) and `m_dum`, `m_dvm`, `m_dwm` (device) store per-element chemistry fields.
+- `m_hrn`, `m_hVeln`, `m_hFn` and their device counterparts hold nodal geometry, velocity, and force vectors; `m_hrm`/`m_drm` capture element centers.
+- `m_hmap_node`, `m_hmap_element`, and `m_hbIndex` (plus GPU mirrors) encode boundary node/element indices and neighbor lookups used by the immersed boundary scheme.
+- `m_hgp` / `m_dgp` hold `GelParams`, including geometry offsets and reaction/mechanical coefficients.
 
 ### Fluid-related
 - `d_f`, `d_fpost`, `d_fnext`: LBM distribution arrays for streaming and collision steps.
 - `d_rho`, `d_u`: Macroscopic density and velocity fields.
 - `d_F_ibm`: Accumulated body force contributions from the gel.
+- `d_c1`, `d_c2`: Scalar concentration fields advanced alongside velocity.
 
 ### Coupling Buffers
-- `d_lag`, `d_Ul`, `d_Vl`: Lagrangian data exchanged between gel and fluid during IBM iterations.
-- `d_Fl`: Gel reaction forces awaiting distribution to the fluid grid.
+- `d_lag_all_`, `d_Ul_all_`, `d_Vl_all_`: Aggregated Lagrangian boundary positions and velocities for all gels.
+- `d_Fl_all_`, `d_Dl_all_`: Aggregated boundary forces and marker spacings used when spreading to the Eulerian grid.
+- `d_owner`: Gel ownership flags for each packed boundary entry.
 - `d_A`: Intended auxiliary array for IBM spreading (currently not allocated—see [Implementation Caveats](#implementation-caveats)).
 
 ---
 
 ## Output Artefacts
-Each parameter sweep run creates a numbered directory (`0`, `1`, …). Within it the solver periodically writes ASCII files of the form:
+All outputs are written to the working directory every 1000 iterations (time is reported in physical units using `dt`). Filenames encode the gel ID and iteration time:
 
 | Filename Pattern | Contents |
 | ---------------- | -------- |
-| `rnXXXX.dat`, `rmXXXX.dat` | Gel node and element center positions at time index `XXXX`.
-| `umXXXX.dat`, `vmXXXX.dat`, `wmXXXX.dat` | Chemistry fields `u`, `v`, `w` sampled over the gel mesh.
-| `FnXXXX.dat` | Gel nodal force vectors.
-| `VelnXXXX.dat` | Gel nodal velocities.
-| `VelbXXXX.dat` | Eulerian fluid velocity field.
+| `gel<id>rnXXXX.dat`, `gel<id>rmXXXX.dat` | Gel node (`rn`) and element center (`rm`) positions for gel `<id>` at time `XXXX`. |
+| `gel<id>umXXXX.dat`, `gel<id>vmXXXX.dat`, `gel<id>wmXXXX.dat` | Chemistry fields `u`, `v`, `w` on the gel elements. |
+| `gel<id>FnXXXX.dat`, `gel<id>VelnXXXX.dat` | Gel nodal forces and velocities. |
+| `VelbXXXX.dat` | Eulerian fluid velocity field. |
+| `ConcXXXX.dat` | Fluid concentration scalar field. |
 
 The files can be ingested by Python/Matlab scripts or converted to VTK for visualization.
 
 ---
 
 ## Extending the Solver
-1. **Multiple Gels:** Introduce a `GelInstance` structure and teach `GelSystem`/kernels to iterate over multiple instances with separate offsets to study gel–gel interactions.
-2. **Portable Runtime:** Replace Windows-specific `_mkdir`/`_chdir` calls with `std::filesystem` and make the CUDA device selection configurable instead of hard-coding `cudaSetDevice(1)`.
-3. **Improved Restart Handling:** Validate checkpoint file availability before loading, and allow the restart directory to be configured.
+1. **Configurable Scenes:** Replace the hard-coded two-gel setup in `sim.cpp` with file- or CLI-driven scene descriptions so arbitrary gel counts, positions, and material types can be simulated without recompiling.
+2. **Portable Runtime:** Expose GPU selection and output locations via arguments or configuration files instead of relying on in-source constants such as `cudaSetDevice(1)`.
+3. **Checkpoint/Restart:** Add periodic checkpoint writing and a restart path to avoid losing long simulations if the process exits unexpectedly.
 4. **Physics Enhancements:** Add new reaction kinetics, active stress models, or boundary conditions by augmenting CUDA kernels and associated parameter packs.
-5. **Testing Infrastructure:** Create regression tests that run a few time steps on a small grid, verifying conservation laws and buffer initialization (e.g., ensuring `m_hfilament` is zeroed correctly).
+5. **Testing Infrastructure:** Create regression tests that run a few time steps on a small grid, verifying conservation laws and buffer initialization before larger runs.
 
 ---
 
 ## Implementation Caveats
 The current code base contains several issues highlighted during inspection:
 
-- `cudaSetDevice(1)` in `gel.cpp` assumes a second GPU and will fail on single-GPU systems; it should query available devices and fall back to `0`.
-- Directory management in `gel.cpp` uses Windows-only APIs (`_mkdir`, `_chdir`), hindering portability.
-- `allocateHostStorage` clears `m_hfilament` with `sizeof(bool)` instead of `sizeof(double3)`, leaving part of the buffer uninitialized.
-- `d_A` is passed to IBM kernels but never allocated in `allocateDeviceStorage`, risking undefined behavior.
-- `setGoonValue` does not verify checkpoint file availability, so restarts silently fail when files are missing.
+- `cudaSetDevice(1)` in `sim.cpp` assumes a second GPU and will fail on single-GPU systems; it should query available devices and fall back to `0`.
+- `d_A` is passed to IBM kernels in `fluid.cu` but never allocated in `allocateDeviceStorage`, risking undefined behavior.
+- CUDA API calls and kernel launches lack error checking, which can hide failures until they corrupt later steps.
+- Output writes drop all files into the working directory without subfolders or metadata, making multi-run management cumbersome.
 
 Addressing these items is recommended before large-scale studies.
 
@@ -159,7 +159,7 @@ Addressing these items is recommended before large-scale studies.
 - **Runtime Failures:** Enable CUDA error checking after every API call (`cudaGetLastError`) to detect invalid allocations or launches early.
 - **Performance:** Use Nsight Compute to confirm memory bandwidth usage of key kernels (`k_ibm_spread`, `k_collide`). Ensure coalesced memory access by aligning gel node counts with warp sizes where possible.
 - **I/O Bottlenecks:** The asynchronous writer thread can lag behind on large grids. Consider batching outputs or writing in binary to reduce file size.
-- **Portability:** When porting to Linux, substitute `_mkdir`/`_chdir` with `std::filesystem::create_directories` / `current_path` and guard platform-specific includes with `#ifdef _WIN32`.
+- **Portability:** Audit any future platform-specific additions (filesystem, threading, timing) and guard them appropriately so the solver builds cleanly on both Windows and Linux toolchains.
 
 ---
 
