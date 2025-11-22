@@ -12,12 +12,13 @@ fmt_vm2    = 'gel2vm%d.dat';
 % -----------------------------------
 
 fmt_velb   = 'Velb%d.dat';
-frames     = 0:1:10;
+frames     = 0:1:100;
 fps        = 10;
 
 %% 网格尺寸（示例）
-nx_s=5; ny_s=5; nz_s=5;            % solid 网格点数（两块凝胶各自都是这个尺寸）
-nx_f=101; ny_f=101; nz_f=101;      % fluid 网格点数
+nx_s1=15; ny_s1=15; nz_s1=4;            % solid 网格点数（两块凝胶各自都是这个尺寸）
+nx_s2=25; ny_s2=25; nz_s2=4;
+nx_f=301; ny_f=101; nz_f=21;      % fluid 网格点数
 
 %% 网格步长与偏移（关键）
 h_s = 1.0;
@@ -84,13 +85,13 @@ for t = frames
     % ==========================================================
     RM1 = load(file_rm1);    % [x y z]
     VM1 = load(file_vm1);    % [c]
-    if size(RM1,2) < 3 || numel(VM1) ~= nx_s*ny_s*nz_s || size(RM1,1) ~= nx_s*ny_s*nz_s
+    if size(RM1,2) < 3 || numel(VM1) ~= nx_s1*ny_s1*nz_s1 || size(RM1,1) ~= nx_s1*ny_s1*nz_s1
         warning('帧 %d：rm1/vm1 尺寸不符，跳过', t); continue;
     end
-    X1 = reshape(RM1(:,1), [nx_s,ny_s,nz_s]);
-    Y1 = reshape(RM1(:,2), [nx_s,ny_s,nz_s]);
-    Z1 = reshape(RM1(:,3), [nx_s,ny_s,nz_s]);
-    C1 = reshape(VM1(:,1), [nx_s,ny_s,nz_s]);
+    X1 = reshape(RM1(:,1), [nx_s1,ny_s1,nz_s1]);
+    Y1 = reshape(RM1(:,2), [nx_s1,ny_s1,nz_s1]);
+    Z1 = reshape(RM1(:,3), [nx_s1,ny_s1,nz_s1]);
+    C1 = reshape(VM1(:,1), [nx_s1,ny_s1,nz_s1]);
 
     % 外表面六面（凝胶1）
     % z面
@@ -108,13 +109,13 @@ for t = frames
     % ==========================================================
     RM2 = load(file_rm2);    % [x y z]
     VM2 = load(file_vm2);    % [c]
-    if size(RM2,2) < 3 || numel(VM2) ~= nx_s*ny_s*nz_s || size(RM2,1) ~= nx_s*ny_s*nz_s
+    if size(RM2,2) < 3 || numel(VM2) ~= nx_s2*ny_s2*nz_s2 || size(RM2,1) ~= nx_s2*ny_s2*nz_s2
         warning('帧 %d：rm2/vm2 尺寸不符，跳过', t); continue;
     end
-    X2 = reshape(RM2(:,1), [nx_s,ny_s,nz_s]);
-    Y2 = reshape(RM2(:,2), [nx_s,ny_s,nz_s]);
-    Z2 = reshape(RM2(:,3), [nx_s,ny_s,nz_s]);
-    C2 = reshape(VM2(:,1), [nx_s,ny_s,nz_s]);
+    X2 = reshape(RM2(:,1), [nx_s2,ny_s2,nz_s2]);
+    Y2 = reshape(RM2(:,2), [nx_s2,ny_s2,nz_s2]);
+    Z2 = reshape(RM2(:,3), [nx_s2,ny_s2,nz_s2]);
+    C2 = reshape(VM2(:,1), [nx_s2,ny_s2,nz_s2]);
 
     % 外表面六面（凝胶2）
     % z面

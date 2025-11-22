@@ -54,19 +54,19 @@ __device__ static int id3(int x, int y, int z, int Nx, int Ny) {
 	return x + y * Nx + z * Nx * Ny;
 }
 
-__global__ void k_add_reaction_to_gel(int* bIndex, double3* Fn, double* un_norm, float3* Fl, float* Cl, int M)
+__global__ void k_add_reaction_to_gel(int* bIndex, double3* Fn, double* un_norm, float3* Fl, float* Sl, int M)
 {
 	int l = blockDim.x * blockIdx.x + threadIdx.x;
 	if (l >= M) return;
 
 	int id = bIndex[l];
 	float3 f = Fl[l];
-	float c = Cl[l];
+	float s = Sl[l];
 
 	Fn[id].x = -(double)f.x;
 	Fn[id].y = -(double)f.y;
 	Fn[id].z = -(double)f.z;
-	un_norm[id] = (double)c;
+	un_norm[id] = -(double)s;
 }
 
 __device__ __forceinline__ float3 to_float3(const double3 a) {

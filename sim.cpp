@@ -6,16 +6,16 @@
 
 using namespace std;
 
-#define runstep 10000
+#define runstep 100000
 
 int main(int argc, char** argv)
 {
-    cudaSetDevice(1);
-    int3    fluidSize = make_int3(101, 101, 101);
-    int3    gelSize1 = make_int3(6, 6, 6);
-    int3    gelSize2 = make_int3(6, 6, 6);
-    double3 gelPos1 = make_double3(15.0, 15.0, 15.0);
-    double3 gelPos2 = make_double3(35.0, 35.0, 35.0);
+    cudaSetDevice(0);
+    int3    fluidSize = make_int3(301, 101, 21);
+    int3    gelSize1 = make_int3(16, 16, 5);
+    int3    gelSize2 = make_int3(26, 26, 5);
+    double3 gelPos1 = make_double3(50.0, 25.0, 5.0);
+    double3 gelPos2 = make_double3(100.0, 25.0, 5.0);
     string  gelType1 = "NIPAAM";
     string  gelType2 = "PAAM";
     int     gelId1 = 1;

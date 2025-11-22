@@ -16,6 +16,9 @@ void Gel::allocateHostStorage()
 	m_hum = new double[m_numGelElements];
 	memset(m_hum, 0, m_numGelElements * sizeof(double));
 
+	m_hun_norm = new double[m_numGelElements];
+	memset(m_hun_norm, 0, m_numGelElements * sizeof(double));
+
 	m_hvm = new double[m_numGelElements];
 	memset(m_hvm, 0, m_numGelElements * sizeof(double));
 
@@ -52,6 +55,7 @@ void Gel::allocateDeviceStorage()
 	cudaMalloc((void**)&m_dum, m_numGelElements * sizeof(double));
 	cudaMalloc((void**)&m_dum_norm, m_numGelElements * sizeof(double));
 	cudaMalloc((void**)&m_dun_norm, m_numGelNodes * sizeof(double));
+	cudaMalloc((void**)&m_dun_robin, m_numGelNodes * sizeof(double));
 
 	cudaMalloc((void**)&m_dvm, m_numGelElements * sizeof(double));
 	cudaMalloc((void**)&m_dvm_norm, m_numGelElements * sizeof(double));
@@ -69,6 +73,7 @@ void Gel::allocateDeviceStorage()
 	cudaMalloc((void**)&m_drm, m_numGelElements * sizeof(double3));
 
 	cudaMalloc((void**)&m_dFn, m_numGelNodes * sizeof(double3));
+	cudaMalloc((void**)&m_dFn_robin, m_numGelNodes * sizeof(double3));
 	cudaMalloc((void**)&m_dVeln, m_numGelNodes * sizeof(double3));
 	cudaMalloc((void**)&m_dVels, m_numGelNodes * sizeof(double3));
 
@@ -169,6 +174,16 @@ void Gel::setInitValue()
 			}
 		}
 	}
+
+	for (int zi = 1; zi < m_gelSize.z + 1; zi++) {
+		for (int yi = 1; yi < m_gelSize.y + 1; yi++) {
+			for (int xi = 1; xi < m_gelSize.x + 1; xi++) {
+				int gi = get_index(xi, yi, zi, 2);
+				m_hun_norm[gi] = 0;
+			}
+		}
+	}
+
 	setChemicalWave(0);
 	//Init gel coords
 	double lam = pow(m_hgp->FA0 / m_hgp->wss, 1 / 3.0);
@@ -255,6 +270,7 @@ void Gel::setType(int* a, int size)
 void Gel::copyDataToDevice()
 {
 	cudaMemcpy(m_dum, m_hum, sizeof(double) * m_numGelElements, cudaMemcpyHostToDevice);
+	cudaMemcpy(m_dun_norm, m_hun_norm, sizeof(double) * m_numGelNodes, cudaMemcpyHostToDevice);
 	cudaMemcpy(m_dvm, m_hvm, sizeof(double) * m_numGelElements, cudaMemcpyHostToDevice);
 	cudaMemcpy(m_dwm, m_hwm, sizeof(double) * m_numGelElements, cudaMemcpyHostToDevice);
 	cudaMemcpy(m_drn, m_hrn, sizeof(double3) * m_numGelNodes, cudaMemcpyHostToDevice);
@@ -279,6 +295,7 @@ void Gel::copyDataToHost()
 void Gel::freeHostMemory()
 {
 	delete[] m_hum;
+	delete[] m_hun_norm;
 	delete[] m_hvm;
 	delete[] m_hwm;
 	delete[] m_hrn;
@@ -295,6 +312,7 @@ void Gel::freeDeviceMemory()
 	cudaFree(m_dum);
 	cudaFree(m_dum_norm);
 	cudaFree(m_dun_norm);
+	cudaFree(m_dun_robin);
 	cudaFree(m_dvm);
 	cudaFree(m_dvm_norm);
 	cudaFree(m_dvn_norm);
@@ -306,6 +324,7 @@ void Gel::freeDeviceMemory()
 	cudaFree(m_drn);
 	cudaFree(m_drm);
 	cudaFree(m_dFn);
+	cudaFree(m_dFn_robin);
 	cudaFree(m_dVeln);
 	cudaFree(m_dVels);
 	cudaFree(m_drm_loc);
@@ -415,6 +434,7 @@ Gel::Gel(int3 gelSize, double3 gelPosition, string gelType, int gelId, int time)
 	m_gelType(gelType),
 	//CPU data
 	m_hum(0),
+	m_hun_norm(0),
 	m_hvm(0),
 	m_hwm(0),
 	m_hrn(0),
@@ -428,6 +448,7 @@ Gel::Gel(int3 gelSize, double3 gelPosition, string gelType, int gelId, int time)
 	m_dum(0),
 	m_dum_norm(0),
 	m_dun_norm(0),
+	m_dun_robin(0),
 	m_dvm(0),
 	m_dvm_norm(0),
 	m_dvn_norm(0),
@@ -439,6 +460,7 @@ Gel::Gel(int3 gelSize, double3 gelPosition, string gelType, int gelId, int time)
 	m_drn(0),
 	m_drm(0),
 	m_dFn(0),
+	m_dFn_robin(0),
 	m_dVeln(0),
 	m_dVels(0),
 	m_drm_loc(0),
@@ -476,7 +498,7 @@ Gel::Gel(int3 gelSize, double3 gelPosition, string gelType, int gelId, int time)
 	m_hgp->LX = m_gelSize.x;
 	m_hgp->LY = m_gelSize.y;
 	m_hgp->LZ = m_gelSize.z;
-	m_hgp->I = 0.01;
+	m_hgp->I = 0.0;
 	m_hgp->f = 0.9;
 	m_hgp->ep = 0.3;
 	m_hgp->q = 1e-4;
@@ -525,11 +547,12 @@ void Gel::stepElasticity(int iter)
 		calServiceNodesPositionD << < m_gridDim2, m_blockDim, 0, m_gel_stream >> > (m_drn, m_dmap_node, m_dgp);
 		calElementPropertiesD << <m_gridDim1, m_blockDim, 0, m_gel_stream >> > (m_drn, m_drm, m_drm_loc, m_dnmSm, m_dVolm, m_dwm, m_dwmp, m_dgp);
 		calPressureD << < m_gridDim_1, m_blockDim, 0, m_gel_stream >> > (m_dPrem, m_dvm, m_dwm, m_dgp);
-		calNodesVelocityD << < m_gridDim0, m_blockDim, 0, m_gel_stream >> > (m_drn, m_dVeln, m_dVels, m_dFn, m_dnmSm, m_dPrem, m_dwm, m_dgp);
+		calNodesVelocityD << < m_gridDim0, m_blockDim, 0, m_gel_stream >> > (m_drn, m_dVeln, m_dVels, m_dFn, m_dFn_robin, m_dnmSm, m_dPrem, m_dwm, m_dgp);
 		calInternalNodesPositionD << < m_gridDim0, m_blockDim, 0, m_gel_stream >> > (m_drn, m_dVeln, m_dgp);
 		calChemBoundaryD << < m_gridDim1, m_blockDim, 0, m_gel_stream >> > (m_dum, m_dum_norm, m_dvm, m_dvm_norm, m_dwm, m_dmap_element, time, m_dgp);
-		calUnnormD << < m_gridDim0, m_blockDim, 0, m_gel_stream >> > (m_dun_norm, m_dum_norm, m_dvn_norm, m_dvm_norm, m_dgp);
+		calUnnormD << < m_gridDim0, m_blockDim, 0, m_gel_stream >> > (m_dun_norm, m_dun_robin, m_dum_norm, m_dvn_norm, m_dvm_norm, m_dgp);
 		calTermsD << < m_gridDim_1, m_blockDim, 0, m_gel_stream >> > (m_dT0m, m_dT1m, m_dT2m, m_dwm, m_dwmp, m_dVeln, m_dnmSm, m_dVolm, m_drm_loc, m_dun_norm, m_dum_norm, m_drm, m_dgp);
+		setZero << < m_gridDim0, m_blockDim, 0, m_gel_stream >> > (m_dun_robin, m_dFn_robin, m_dgp);
 	}
 }
 

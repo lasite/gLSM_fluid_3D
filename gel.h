@@ -47,6 +47,7 @@ public:
 	GelParams* m_hgp;
 	//chemical variables
 	double* m_hum;
+	double* m_hun_norm;
 	double* m_hvm;
 	double* m_hwm;
 	double* m_hvm_center;
@@ -73,6 +74,7 @@ public:
 	double* m_dum;
 	double* m_dum_norm;
 	double* m_dun_norm;
+	double* m_dun_robin;
 	double* m_dvm;
 	double* m_dvm_norm;
 	double* m_dvn_norm;
@@ -93,6 +95,7 @@ public:
 	double3* m_dVeln;
 	double3* m_dVels;
 	double3* m_dFn;
+	double3* m_dFn_robin;
 	double3* m_drm_loc;
 	double3* m_dnmSm;
 	double* m_dVolm;

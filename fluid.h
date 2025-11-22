@@ -56,6 +56,7 @@ public:  // data
     float3* d_F;
     float* d_c1;
     float* d_c2;
+    float* d_source;
     float3* d_F_ibm;
     float3* d_F_tot;
     FluidParams* d_fp;

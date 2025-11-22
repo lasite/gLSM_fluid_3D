@@ -41,6 +41,7 @@ public:
 	float3* d_Fl_all_;
 	float* d_Cl_all_;
 	float* d_Dl_all_;
+	float* d_Sl_all_;
 	int* d_owner;
 	CouplerParams* d_cp;
 

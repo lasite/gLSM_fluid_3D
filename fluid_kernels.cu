@@ -110,10 +110,16 @@ __global__  void k_macros(float* f, float* rho, float3* u, float3* F, FluidParam
 	u[i] = (s + 0.5f * F[i]) / rh;
 }
 
-__global__  void k_zero(float3* a, FluidParams* fp) {
+__global__  void k_zero_vector(float3* a, FluidParams* fp) {
 	int i = blockDim.x * blockIdx.x + threadIdx.x;
 	if (i < fp->N)
 		a[i] = make_float3(0.f, 0.f, 0.f);
+}
+
+__global__  void k_zero_scalar(float* a, FluidParams* fp) {
+	int i = blockDim.x * blockIdx.x + threadIdx.x;
+	if (i < fp->N)
+		a[i] = 0.f;
 }
 
 __global__  void k_collide(float* f, float* fpost, float* rho, float3* u, float3* F, FluidParams* fp) {
@@ -168,7 +174,7 @@ __device__ __forceinline__ float dot3(const float3 a, const float3 b) {
 	return a.x * b.x + a.y * b.y + a.z * b.z;
 }
 
-__global__ void k_convection_diffusion(float3* d_u, float* d_c1, float* d_c2, FluidParams* fp)
+__global__ void k_convection_diffusion(float3* u, float* c1, float* c2, float* source, FluidParams* fp)
 {
 	const int Nx = fp->L.x, Ny = fp->L.y, Nz = fp->L.z;
 	const int N = fp->N;
@@ -200,17 +206,17 @@ __global__ void k_convection_diffusion(float3* d_u, float* d_c1, float* d_c2, Fl
 	const float3 inv_h = make_float3(1.0f / h.x, 1.0f / h.y, 1.0f / h.z);
 	const float3 inv_h2 = make_float3(inv_h.x * inv_h.x, inv_h.y * inv_h.y, inv_h.z * inv_h.z);
 
-	const float c = d_c1[idx];
-	const float cxp = d_c1[idx_xp], cxm = d_c1[idx_xm];
-	const float cyp = d_c1[idx_yp], cym = d_c1[idx_ym];
-	const float czp = d_c1[idx_zp], czm = d_c1[idx_zm];
+	const float c = c1[idx];
+	const float cxp = c1[idx_xp], cxm = c1[idx_xm];
+	const float cyp = c1[idx_yp], cym = c1[idx_ym];
+	const float czp = c1[idx_zp], czm = c1[idx_zm];
 
-	const float uL = 0.5f * (d_u[idx_xm].x + d_u[idx].x);
-	const float uR = 0.5f * (d_u[idx].x + d_u[idx_xp].x);
-	const float vL = 0.5f * (d_u[idx_ym].y + d_u[idx].y);
-	const float vR = 0.5f * (d_u[idx].y + d_u[idx_yp].y);
-	const float wL = 0.5f * (d_u[idx_zm].z + d_u[idx].z);
-	const float wR = 0.5f * (d_u[idx].z + d_u[idx_zp].z);
+	const float uL = 0.5f * (u[idx_xm].x + u[idx].x);
+	const float uR = 0.5f * (u[idx].x + u[idx_xp].x);
+	const float vL = 0.5f * (u[idx_ym].y + u[idx].y);
+	const float vR = 0.5f * (u[idx].y + u[idx_yp].y);
+	const float wL = 0.5f * (u[idx_zm].z + u[idx].z);
+	const float wR = 0.5f * (u[idx].z + u[idx_zp].z);
 
 	const float3 vL3 = make_float3(uL, vL, wL);
 	const float3 vR3 = make_float3(uR, vR, wR);
@@ -232,8 +238,7 @@ __global__ void k_convection_diffusion(float3* d_u, float* d_c1, float* d_c2, Fl
 		cym - 2.0f * c + cyp,
 		czm - 2.0f * c + czp);
 	const float diff = fp->D * dot3(sec, inv_h2);
-
-	d_c2[idx] = c + fp->dt * (conv + diff);
+	c2[idx] = c + fp->dt * (conv + diff + source[idx]);
 }
 
 __global__ void k_ibm_interpolate_velocity(float3* u, float3* Ul, float3* lag, FluidParams* fp) {
@@ -280,6 +285,13 @@ __global__ void k_scale_negbeta(float3* Ul, float3* Vl, float3* Fl, float beta_e
 	if (l >= fp->M) return;
 	//Fl[l] = fp->beta * (Vl[l] - Ul[l]);
 	Fl[l] = beta_eff * (Vl[l] - Ul[l]);
+}
+
+__global__ void k_robin_boundary(float* Cl, float* Dl, float* Sl, FluidParams* fp) {
+	int l = blockDim.x * blockIdx.x + threadIdx.x;
+	if (l >= fp->M) return;
+	//Sl[l] = fp->beta * (Cl[l] - Dl[l]);
+	Sl[l] = 1 * (Cl[l] - Dl[l]);
 }
 
 __global__ void k_ibm_spread_forces(float3* F_ibm, float3* Fl, float3* lag, float* dA, FluidParams* fp) {
@@ -371,6 +383,31 @@ __global__ void k_ibm_sample_concentration(float* c, float* Cl, float3* lag, Flu
 	}
 }
 
+__global__ void k_ibm_clear_concentration_local(float* c, const float3* lag, const FluidParams* fp) {
+	int l = blockDim.x * blockIdx.x + threadIdx.x; 
+	if (l >= fp->M) return; 
+
+	const float h = fp->h; 
+	const int Nx = fp->L.x; const int Ny = fp->L.y; const int Nz = fp->L.z; 
+	
+	const float gx = lag[l].x / h; 
+	const float gy = lag[l].y / h; 
+	const float gz = lag[l].z / h; 
+	
+	const int ix = (int)floorf(gx); 
+	const int iy = (int)floorf(gy); 
+	const int iz = (int)floorf(gz); 
+	
+	for (int ii = max(0, ix - 1); ii <= min(Nx - 1, ix + 2); ++ii) {
+		for (int jj = max(0, iy - 1); jj <= min(Ny - 1, iy + 2); ++jj) {
+			for (int kk = max(0, iz - 1); kk <= min(Nz - 1, iz + 2); ++kk) {
+				int id = id3(ii, jj, kk, Nx, Ny); 
+				c[id] = 0.0f; 
+			} 
+		} 
+	} 
+}
+
 __global__ void k_ibm_spread_concentration(float* c, float* Dl, float3* lag, float* dA, FluidParams* fp) {
 	int l = blockDim.x * blockIdx.x + threadIdx.x;
 	if (l >= fp->M) return;
@@ -396,8 +433,6 @@ __global__ void k_ibm_spread_concentration(float* c, float* Dl, float3* lag, flo
 			for (int kk = max(0, iz - 1); kk <= min(Nz - 1, iz + 2); ++kk) {
 				const float phiz = delta4(gz - (float)kk);
 				wsum += phix * phiy * phiz;
-				const int id = id3(ii, jj, kk, Nx, Ny);
-				c[id] = 0;
 			}
 		}
 	}

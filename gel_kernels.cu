@@ -552,7 +552,7 @@ __global__ void calPressureD(double* pm, double* vm, double* wm, GelParams* gp)
 	pm[gi] = -(wmt + log(1.0 - wmt) + (gp->CH0 + gp->CH1 * wmt) * wmt * wmt) + gp->C0 * wmt / (2.0 * gp->FA0) + gp->CHS * wmt * vm[gi];
 }
 
-__global__ void calNodesVelocityD(double3* rn, double3* ven, double3* ves, double3* Fn, double3* nmSm, double* pm, double* wm, GelParams* gp)
+__global__ void calNodesVelocityD(double3* rn, double3* ven, double3* ves, double3* Fn, double3* Fn_robin, double3* nmSm, double* pm, double* wm, GelParams* gp)
 {
 	int xi = threadIdx.x + blockIdx.x * blockDim.x + 1;
 	int yi = threadIdx.y + blockIdx.y * blockDim.y + 1;
@@ -623,7 +623,8 @@ __global__ void calNodesVelocityD(double3* rn, double3* ven, double3* ves, doubl
 
 	f1n *= pow(gp->dx * gp->dy * gp->dz, 1 / 3) * gp->C0 / 12.;
 	f2n /= 4.;
-	Fn[gi] = f1n + f2n;
+	//Fn[gi] += f1n + f2n;
+	Fn[gi] = f1n + f2n + Fn_robin[gi];
 	ven[gi] = Mn * Fn[gi];
 	ves[gi] = -wn * ven[gi] / (1 - wn);
 }
@@ -689,9 +690,9 @@ __global__ void calTermsD(double* T0, double* T1, double* T2, double* wm, double
 #pragma unroll
 	for (int i = 0; i < 2; i++) {
 #pragma unroll
-		for (int j = 0; i < 2; i++) {
+		for (int j = 0; j < 2; j++) {
 #pragma unroll
-			for (int k = 0; i < 2; i++) {
+			for (int k = 0; k < 2; k++) {
 				int id1 = gi_rm_loc + count;
 				count++;
 				int id2 = get_index(xi + i, yi + j, zi + k, 2, LX, LY);
@@ -752,31 +753,31 @@ __global__ void calChemD(double* vm, double* um, double* wm, double* T0, double*
 	double dum = um[gi];
 	double dwm = wm[gi];
 	//Forward Euler method
-	//vm[gi] += gp->dt * (-dvm * T0[gi] + gp->ep * fv(dum, dvm, dwm, I));
-	//um[gi] += gp->dt * (-dum * T0[gi] + T1[gi] + T2[gi] + fu(dum, dvm, dwm, I));
+	vm[gi] += gp->dt * (-dvm * T0[gi] + gp->ep * fv(dum, dvm, dwm, I));
+	um[gi] += gp->dt * (-dum * T0[gi] + T1[gi] + T2[gi] + fu(dum, dvm, dwm, gp->f, I));
 
 
 	//Fourth order Runge Kutta method
-	double k1_vm, k2_vm, k3_vm, k4_vm;
-	double k1_um, k2_um, k3_um, k4_um;
+	//double k1_vm, k2_vm, k3_vm, k4_vm;
+	//double k1_um, k2_um, k3_um, k4_um;
 
-	// k1
-	k1_vm = gp->dt * (-dvm * T0[gi] + gp->ep * fv(dum, dvm, dwm, I));
-	k1_um = gp->dt * (-dum * T0[gi] + T1[gi] + T2[gi] + fu(dum, dvm, dwm, I));
+	//// k1
+	//k1_vm = gp->dt * (-dvm * T0[gi] + gp->ep * fv(dum, dvm, dwm, I));
+	//k1_um = gp->dt * (-dum * T0[gi] + T1[gi] + T2[gi] + fu(dum, dvm, dwm, I));
 
-	// k2
-	k2_vm = gp->dt * (-dvm * (T0[gi] + 0.5 * k1_vm) + gp->ep * fv(dum + 0.5 * k1_um, dvm + 0.5 * k1_vm, dwm, I));
-	k2_um = gp->dt * (-dum * (T0[gi] + 0.5 * k1_vm) + (T1[gi] + 0.5 * k1_um) + (T2[gi] + 0.5 * k1_um) + fu(dum + 0.5 * k1_um, dvm + 0.5 * k1_vm, dwm, I));
+	//// k2
+	//k2_vm = gp->dt * (-dvm * (T0[gi] + 0.5 * k1_vm) + gp->ep * fv(dum + 0.5 * k1_um, dvm + 0.5 * k1_vm, dwm, I));
+	//k2_um = gp->dt * (-dum * (T0[gi] + 0.5 * k1_vm) + (T1[gi] + 0.5 * k1_um) + (T2[gi] + 0.5 * k1_um) + fu(dum + 0.5 * k1_um, dvm + 0.5 * k1_vm, dwm, I));
 
-	// k3
-	k3_vm = gp->dt * (-dvm * (T0[gi] + 0.5 * k2_vm) + gp->ep * fv(dum + 0.5 * k2_um, dvm + 0.5 * k2_vm, dwm, I));
-	k3_um = gp->dt * (-dum * (T0[gi] + 0.5 * k2_vm) + (T1[gi] + 0.5 * k2_um) + (T2[gi] + 0.5 * k2_um) + fu(dum + 0.5 * k2_um, dvm + 0.5 * k2_vm, dwm, I));
+	//// k3
+	//k3_vm = gp->dt * (-dvm * (T0[gi] + 0.5 * k2_vm) + gp->ep * fv(dum + 0.5 * k2_um, dvm + 0.5 * k2_vm, dwm, I));
+	//k3_um = gp->dt * (-dum * (T0[gi] + 0.5 * k2_vm) + (T1[gi] + 0.5 * k2_um) + (T2[gi] + 0.5 * k2_um) + fu(dum + 0.5 * k2_um, dvm + 0.5 * k2_vm, dwm, I));
 
-	// k4
-	k4_vm = gp->dt * (-dvm * (T0[gi] + k3_vm) + gp->ep * fv(dum + k3_um, dvm + k3_vm, dwm, I));
-	k4_um = gp->dt * (-dum * (T0[gi] + k3_vm) + (T1[gi] + k3_um) + (T2[gi] + k3_um) + fu(dum + k3_um, dvm + k3_vm, dwm, I));
-	vm[gi] += (k1_vm + 2 * k2_vm + 2 * k3_vm + k4_vm) / 6;
-	um[gi] += (k1_um + 2 * k2_um + 2 * k3_um + k4_um) / 6;
+	//// k4
+	//k4_vm = gp->dt * (-dvm * (T0[gi] + k3_vm) + gp->ep * fv(dum + k3_um, dvm + k3_vm, dwm, I));
+	//k4_um = gp->dt * (-dum * (T0[gi] + k3_vm) + (T1[gi] + k3_um) + (T2[gi] + k3_um) + fu(dum + k3_um, dvm + k3_vm, dwm, I));
+	//vm[gi] += (k1_vm + 2 * k2_vm + 2 * k3_vm + k4_vm) / 6;
+	//um[gi] += (k1_um + 2 * k2_um + 2 * k3_um + k4_um) / 6;
 }
 
 __global__ void calChemBoundaryD(double* um, double* um_norm, double* vm, double* vm_norm, double* wm, int* map_element, int time, GelParams* gp)
@@ -802,7 +803,22 @@ __global__ void calChemBoundaryD(double* um, double* um_norm, double* vm, double
 	vm_norm[gi] = vm[gi] / (1 - wm[gi]);
 }
 
-__global__ void calUnnormD(double* un_norm, double* um_norm, double* vn_norm, double* vm_norm, GelParams* gp)
+__global__ void setZero(double* un_robin, double3* Fn_robin, GelParams* gp)
+{
+	int xi = threadIdx.x + blockIdx.x * blockDim.x + 1;
+	int yi = threadIdx.y + blockIdx.y * blockDim.y + 1;
+	int zi = threadIdx.z + blockIdx.z * blockDim.z + 1;
+	int LX = gp->LX;
+	int LY = gp->LY;
+	int LZ = gp->LZ;
+	if (xi > LX || yi > LY || zi > LZ) {
+		return;
+	}
+	un_robin[get_index(xi, yi, zi, 2, LX, LY)] = 0;
+	Fn_robin[get_index(xi, yi, zi, 2, LX, LY)] = make_double3(0., 0., 0.);
+}
+
+__global__ void calUnnormD(double* un_norm, double* un_robin, double* um_norm, double* vn_norm, double* vm_norm, GelParams* gp)
 {
 	int xi = threadIdx.x + blockIdx.x * blockDim.x + 1;
 	int yi = threadIdx.y + blockIdx.y * blockDim.y + 1;
@@ -826,6 +842,6 @@ __global__ void calUnnormD(double* un_norm, double* um_norm, double* vn_norm, do
 			}
 		}
 	}
-	un_norm[get_index(xi, yi, zi, 2, LX, LY)] = dun_norm / 8;
+	un_norm[get_index(xi, yi, zi, 2, LX, LY)] = dun_norm / 8 + un_robin[get_index(xi, yi, zi, 2, LX, LY)];
 	vn_norm[get_index(xi, yi, zi, 2, LX, LY)] = dvn_norm / 8;
 }

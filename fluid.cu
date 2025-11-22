@@ -35,6 +35,7 @@ void Fluid::allocateDeviceStorage()
 	cudaMalloc(&d_u, N * sizeof(float3));
 	cudaMalloc(&d_c1, N * sizeof(float));
 	cudaMalloc(&d_c2, N * sizeof(float));
+	cudaMalloc(&d_source, N * sizeof(float));
 	cudaMalloc(&d_F, N * sizeof(float3));
 	cudaMalloc(&d_F_ibm, N * sizeof(float3));
 	cudaMalloc(&d_F_tot, N * sizeof(float3));
@@ -71,6 +72,7 @@ void Fluid::freeDeviceMemory()
 	cudaFree(d_u);
 	cudaFree(d_c1);
 	cudaFree(d_c2);
+	cudaFree(d_source);
 	cudaFree(d_F);
 	cudaFree(d_F_ibm);
 	cudaFree(d_F_tot);
@@ -155,7 +157,7 @@ d_A(0)
 	dx_fluid = 40e-6f * h_fp->h;
 	dt_fluid = (h_fp->tau - 0.5f) * dx_fluid * dx_fluid / (3 * niu);
 	Nsub = int(dt / dt_fluid);
-	h_fp->beta = 0.01f;
+	h_fp->beta = 1.0f;
 	int3 c[19] = {
 	{0,0,0},
 	{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1},
@@ -194,10 +196,11 @@ void Fluid::_initialize(int time)
 void Fluid::stepConcentration()
 {
 	k_ibm_sample_concentration << <blocksM, threads, 0, fluid_stream >> > (d_c1, coupler->d_Dl_all_, coupler->d_lag_all_, d_fp);
-	swap(coupler->d_Cl_all_, coupler->d_Dl_all_);
-	k_ibm_spread_concentration << <blocksM, threads, 0, fluid_stream >> > (d_c1, coupler->d_Dl_all_, coupler->d_lag_all_, d_A, d_fp);
-    k_convection_diffusion << <blocksN, threads, 0, fluid_stream >> > (d_u, d_c1, d_c2, d_fp);
-    swap(d_c1, d_c2);
+	k_robin_boundary << <blocksM, threads, 0, fluid_stream >> > (coupler->d_Cl_all_, coupler->d_Dl_all_, coupler->d_Sl_all_, d_fp);
+	k_zero_scalar << <blocksN, threads, 0, fluid_stream >> > (d_source, d_fp);
+	k_ibm_spread_concentration << <blocksM, threads, 0, fluid_stream >> > (d_source, coupler->d_Sl_all_, coupler->d_lag_all_, d_A, d_fp);
+	k_convection_diffusion << <blocksN, threads, 0, fluid_stream >> > (d_u, d_c1, d_c2, d_source, d_fp);
+	swap(d_c1, d_c2);
 }
 
 void Fluid::stepVelocity(long long int iter)
@@ -215,7 +218,7 @@ void Fluid::stepVelocity(long long int iter)
 		k_collide << <blocksN, threads, 0, fluid_stream >> > (d_f, d_fpost, d_rho, d_u, d_F_tot, d_fp);
 		k_stream_bounce << <blocksN, threads, 0, fluid_stream >> > (d_fpost, d_fnext, d_fp);
 		swap(d_f, d_fnext);
-		k_zero << <blocksN, threads, 0, fluid_stream >> > (d_F_ibm, d_fp);
+		k_zero_vector << <blocksN, threads, 0, fluid_stream >> > (d_F_ibm, d_fp);
 	}
 }
 

@@ -1,14 +1,14 @@
 %% 参数设置
 clear; clc;
 
-Nx = 101; Ny = 101; Nz = 101;       % 与 C++ 里的 fluidSize 一致
+Nx = 301; Ny = 101; Nz = 21;       % 与 C++ 里的 fluidSize 一致
 Ncell = Nx * Ny * Nz;
 
-zIndex = 70;                        % 取中间层 xy 剖面，可改
+zIndex = 10;                        % 取中间层 xy 剖面，可改
 skip = 3;                           % quiver 下采样步长，避免太密
 
 % 根据你输出的时间步来设置，这里假设从 0 到 100，每步 1
-timeList = 0:1:10;                 % <- 根据你实际的 time 修改
+timeList = 0:1:100;                 % <- 根据你实际的 time 修改
 
 %% 创建视频
 v = VideoWriter('xy_slice.avi', 'Motion JPEG AVI');
@@ -59,7 +59,7 @@ for t = timeList
     axis equal tight;
     colormap(jet);
     colorbar;
-    %clim([0 0.1]);
+    clim([0 0.2]);
     hold on;
 
     % 下采样后画矢量场

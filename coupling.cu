@@ -18,6 +18,7 @@ void Coupler::allocateDeviceStorage()
     cudaMalloc(&d_Vl_all_, sizeof(float3) * sumGelBoundaryCount);
     cudaMalloc(&d_Fl_all_, sizeof(float3) * sumGelBoundaryCount);
     cudaMalloc(&d_Cl_all_, sizeof(float) * sumGelBoundaryCount);
+    cudaMalloc(&d_Sl_all_, sizeof(float) * sumGelBoundaryCount);
     cudaMalloc(&d_Dl_all_, sizeof(float) * sumGelBoundaryCount);
     cudaMalloc(&d_bIndex_all_, sizeof(float) * sumGelBoundaryCount);
 }
@@ -51,6 +52,7 @@ Coupler::Coupler(std::vector<Gel*>& gels) :
     d_Vl_all_(0),
     d_Fl_all_(0),
     d_Cl_all_(0),
+    d_Sl_all_(0),
     d_Dl_all_(0),
     d_bIndex_all_(0)
 {
@@ -93,10 +95,10 @@ void Coupler::scatterToGels() {
         const int blocks = (Mi + threads - 1) / threads;
         k_add_reaction_to_gel<<<blocks, threads, 0, gels[i]->m_gel_stream >>>(
             gels[i]->m_dbIndex,
-            gels[i]->m_dFn,
-            gels[i]->m_dun_norm,
+            gels[i]->m_dFn_robin,
+            gels[i]->m_dun_robin,
             d_Fl_all_ + off,
-            d_Cl_all_ + off,
+            d_Sl_all_ + off,
             Mi);
     }
 }
@@ -125,6 +127,7 @@ void Coupler::freeDeviceMemory()
     cudaFree(d_Vl_all_);
     cudaFree(d_Fl_all_);
     cudaFree(d_Cl_all_);
+    cudaFree(d_Sl_all_);
     cudaFree(d_Dl_all_);
     cudaFree(d_bIndex_all_);
 }
