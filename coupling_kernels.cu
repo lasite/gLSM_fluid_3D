@@ -5,53 +5,9 @@
 #include "coupling_kernels.cuh"
 using namespace std;
 
-__device__ static float3 operator-(float3 a, float3 b)
-{
-	return make_float3(a.x - b.x, a.y - b.y, a.z - b.z);
-}
-
 __device__ static float3 operator*(float a, float3 b)
 {
 	return make_float3(a * b.x, a * b.y, a * b.z);
-}
-
-__device__ static float3 operator*(float3 a, float b)
-{
-	return make_float3(a.x * b, a.y * b, a.z * b);
-}
-
-__device__ static float operator*(int3 a, float3 b)
-{
-	return a.x * b.x + a.y * b.y + a.z * b.z;
-}
-
-__device__ static float3 operator/(float3 a, float b)
-{
-	return make_float3(a.x / b, a.y / b, a.z / b);
-}
-
-__device__ static void operator+=(float3& a, float3 b)
-{
-	a.x += b.x;
-	a.y += b.y;
-	a.z += b.z;
-}
-
-__device__ static float delta4(float r) {
-	r = fabsf(r);
-	if (r <= 1.f) {
-		return 0.125f * (3.f - 2.f * r + sqrtf(1.f + 4.f * r - 4.f * r * r));
-	}
-	else if (r <= 2.f) {
-		return 0.125f * (5.f - 2.f * r - sqrtf(-7.f + 12.f * r - 4.f * r * r));
-	}
-	else {
-		return 0.f;
-	}
-}
-
-__device__ static int id3(int x, int y, int z, int Nx, int Ny) {
-	return x + y * Nx + z * Nx * Ny;
 }
 
 __global__ void k_add_reaction_to_gel(int* bIndex, double3* Fn, double* un_norm, float3* Fl, float* Sl, int M)
