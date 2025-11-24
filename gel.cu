@@ -16,9 +16,6 @@ void Gel::allocateHostStorage()
 	m_hum = new double[m_numGelElements];
 	memset(m_hum, 0, m_numGelElements * sizeof(double));
 
-	m_hun_norm = new double[m_numGelElements];
-	memset(m_hun_norm, 0, m_numGelElements * sizeof(double));
-
 	m_hvm = new double[m_numGelElements];
 	memset(m_hvm, 0, m_numGelElements * sizeof(double));
 
@@ -91,14 +88,14 @@ void Gel::allocateDeviceStorage()
 
 int Gel::get_index(int xi, int yi, int zi, int size)
 {
-	return xi + yi * (m_gelSize.x + size) + zi * (m_gelSize.y + size) * (m_gelSize.x + size);
+	return xi + yi * (m_gelNodeGrid.x + size) + zi * (m_gelNodeGrid.y + size) * (m_gelNodeGrid.x + size);
 }
 
 void Gel::setChemicalWave(int wave_type)
 {
-	int LX = m_gelSize.x;
-	int LY = m_gelSize.y;
-	int LZ = m_gelSize.z;
+	int LX = m_gelNodeGrid.x;
+	int LY = m_gelNodeGrid.y;
+	int LZ = m_gelNodeGrid.z;
 	double uss_max = 0.4;
 	double vss_max = 0.4;
 	double cuty = 0.3;
@@ -136,9 +133,9 @@ int Gel::idx3(int x, int y, int z, int Nx, int Ny)
 
 void Gel::buildBoundaryIndex()
 {
-	int LX = m_gelSize.x;
-	int LY = m_gelSize.y;
-	int LZ = m_gelSize.z;
+	int LX = m_gelNodeGrid.x;
+	int LY = m_gelNodeGrid.y;
+	int LZ = m_gelNodeGrid.z;
 	int count = 0;
 	for (int k = 1; k < LZ + 1; ++k) {
 		for (int j = 1; j < LY + 1; ++j) {
@@ -157,9 +154,9 @@ void Gel::setInitValue()
 	//Init chemical variables value
 	//double phi = 0;
 	bool random = false;
-	for (int zi = 1; zi < m_gelSize.z; zi++) {
-		for (int yi = 1; yi < m_gelSize.y; yi++) {
-			for (int xi = 1; xi < m_gelSize.x; xi++) {
+	for (int zi = 1; zi < m_gelNodeGrid.z; zi++) {
+		for (int yi = 1; yi < m_gelNodeGrid.y; yi++) {
+			for (int xi = 1; xi < m_gelNodeGrid.x; xi++) {
 				int gi = get_index(xi, yi, zi, 1);
 				if (random) {
 					m_hum[gi] = m_hgp->uss * (1 + 0.5 * (2 * double(rand()) / RAND_MAX - 1));
@@ -175,25 +172,16 @@ void Gel::setInitValue()
 		}
 	}
 
-	for (int zi = 1; zi < m_gelSize.z + 1; zi++) {
-		for (int yi = 1; yi < m_gelSize.y + 1; yi++) {
-			for (int xi = 1; xi < m_gelSize.x + 1; xi++) {
-				int gi = get_index(xi, yi, zi, 2);
-				m_hun_norm[gi] = 0;
-			}
-		}
-	}
-
 	setChemicalWave(0);
 	//Init gel coords
 	double lam = pow(m_hgp->FA0 / m_hgp->wss, 1 / 3.0);
-	for (int zi = 0; zi < m_gelSize.z + 2; zi++) {
-		for (int yi = 0; yi < m_gelSize.y + 2; yi++) {
-			for (int xi = 0; xi < m_gelSize.x + 2; xi++) {
+	for (int zi = 0; zi < m_gelNodeGrid.z + 2; zi++) {
+		for (int yi = 0; yi < m_gelNodeGrid.y + 2; yi++) {
+			for (int xi = 0; xi < m_gelNodeGrid.x + 2; xi++) {
 				int hi = get_index(xi, yi, zi, 2);
-				m_hrn[hi].x = m_gelPosition.x + (2 * double(xi) - double(m_gelSize.x) - 1) * m_hgp->dx * lam / 2;
-				m_hrn[hi].y = m_gelPosition.y + (2 * double(yi) - double(m_gelSize.y) - 1) * m_hgp->dy * lam / 2;
-				m_hrn[hi].z = m_gelPosition.z + (2 * double(zi) - double(m_gelSize.z) - 1) * m_hgp->dz * lam / 2;
+				m_hrn[hi].x = m_gelPosition.x + (2 * double(xi) - double(m_gelNodeGrid.x) - 1) * m_hgp->dx * lam / 2;
+				m_hrn[hi].y = m_gelPosition.y + (2 * double(yi) - double(m_gelNodeGrid.y) - 1) * m_hgp->dy * lam / 2;
+				m_hrn[hi].z = m_gelPosition.z + (2 * double(zi) - double(m_gelNodeGrid.z) - 1) * m_hgp->dz * lam / 2;
 			}
 		}
 	}
@@ -208,9 +196,9 @@ void Gel::setInitValue()
 void Gel::setType(int* a, int size)
 {
 	int xi, yi, zi;
-	int LX = m_gelSize.x + size - 1;
-	int LY = m_gelSize.y + size - 1;
-	int LZ = m_gelSize.z + size - 1;
+	int LX = m_gelNodeGrid.x + size - 1;
+	int LY = m_gelNodeGrid.y + size - 1;
+	int LZ = m_gelNodeGrid.z + size - 1;
 	for (xi = 1; xi < LX; xi++) {
 		for (yi = 1; yi < LY; yi++) {
 			for (zi = 1; zi < LZ; zi++) {
@@ -270,7 +258,6 @@ void Gel::setType(int* a, int size)
 void Gel::copyDataToDevice()
 {
 	cudaMemcpy(m_dum, m_hum, sizeof(double) * m_numGelElements, cudaMemcpyHostToDevice);
-	cudaMemcpy(m_dun_norm, m_hun_norm, sizeof(double) * m_numGelNodes, cudaMemcpyHostToDevice);
 	cudaMemcpy(m_dvm, m_hvm, sizeof(double) * m_numGelElements, cudaMemcpyHostToDevice);
 	cudaMemcpy(m_dwm, m_hwm, sizeof(double) * m_numGelElements, cudaMemcpyHostToDevice);
 	cudaMemcpy(m_drn, m_hrn, sizeof(double3) * m_numGelNodes, cudaMemcpyHostToDevice);
@@ -295,7 +282,6 @@ void Gel::copyDataToHost()
 void Gel::freeHostMemory()
 {
 	delete[] m_hum;
-	delete[] m_hun_norm;
 	delete[] m_hvm;
 	delete[] m_hwm;
 	delete[] m_hrn;
@@ -304,7 +290,8 @@ void Gel::freeHostMemory()
 	delete[] m_hVeln;
 	delete[] m_hmap_element;
 	delete[] m_hmap_node;
-	free(m_hbIndex);
+	delete[] m_hbIndex;
+	delete m_hgp;
 }
 
 void Gel::freeDeviceMemory()
@@ -334,6 +321,7 @@ void Gel::freeDeviceMemory()
 	cudaFree(m_dmap_element);
 	cudaFree(m_dmap_node);
 	cudaFree(m_dbIndex);
+	cudaFree(m_dgp);
 }
 
 void Gel::steadyStateValue(double& um, double& vm, double& wm, double phi)
@@ -384,9 +372,9 @@ void Gel::recordData(int time)
 		fFn.open(str_Fn);
 		fVeln.open(str_Veln);
 		int gi;
-		for (int zi = 1; zi < m_gelSize.z + 1; zi++) {
-			for (int yi = 1; yi < m_gelSize.y + 1; yi++) {
-				for (int xi = 1; xi < m_gelSize.x + 1; xi++) {
+		for (int zi = 1; zi < m_gelNodeGrid.z + 1; zi++) {
+			for (int yi = 1; yi < m_gelNodeGrid.y + 1; yi++) {
+				for (int xi = 1; xi < m_gelNodeGrid.x + 1; xi++) {
 					gi = get_index(xi, yi, zi, 2);
 					frn << setw(9) << to_string(m_hrn[gi].x) << "      " << setw(9) << to_string(m_hrn[gi].y) << "      " << setw(9) << to_string(m_hrn[gi].z) << "\n";
 					fFn << setw(9) << to_string(m_hFn[gi].x) << "      " << setw(9) << to_string(m_hFn[gi].y) << "      " << setw(9) << to_string(m_hFn[gi].z) << "\n";
@@ -394,9 +382,9 @@ void Gel::recordData(int time)
 				}
 			}
 		}
-		for (int zi = 1; zi < m_gelSize.z; zi++) {
-			for (int yi = 1; yi < m_gelSize.y; yi++) {
-				for (int xi = 1; xi < m_gelSize.x; xi++) {
+		for (int zi = 1; zi < m_gelNodeGrid.z; zi++) {
+			for (int yi = 1; yi < m_gelNodeGrid.y; yi++) {
+				for (int xi = 1; xi < m_gelNodeGrid.x; xi++) {
 					gi = get_index(xi, yi, zi, 1);
 					frm << setw(9) << to_string(m_hrm[gi].x) << "      " << setw(9) << to_string(m_hrm[gi].y) << "      " << setw(9) << to_string(m_hrm[gi].z) << "\n";
 					fum << setw(9) << to_string(m_hum[gi]) << "\n";
@@ -434,7 +422,6 @@ Gel::Gel(int3 gelSize, double3 gelPosition, string gelType, int gelId, int time)
 	m_gelType(gelType),
 	//CPU data
 	m_hum(0),
-	m_hun_norm(0),
 	m_hvm(0),
 	m_hwm(0),
 	m_hrn(0),
@@ -473,31 +460,37 @@ Gel::Gel(int3 gelSize, double3 gelPosition, string gelType, int gelId, int time)
 {
 	m_dt = 1e-3;
 	m_df = int(1 / m_dt);
-	m_numGelElements = (gelSize.x + 1) * (gelSize.y + 1) * (gelSize.z + 1);
-	m_numGelNodes = (gelSize.x + 2) * (gelSize.y + 2) * (gelSize.z + 2);
-	m_boundaryCount = gelSize.x * gelSize.y * gelSize.z - (gelSize.x - 2) * (gelSize.y - 2) * (gelSize.z - 2);
+	m_dx = 1;
+	m_dy = 1;
+	m_dz = 1;
+	m_gelNodeGrid.x = int(gelSize.x / m_dx) + 1;
+	m_gelNodeGrid.y = int(gelSize.y / m_dy) + 1;
+	m_gelNodeGrid.z = int(gelSize.z / m_dz) + 1;
+	m_numGelElements = (m_gelNodeGrid.x + 1) * (m_gelNodeGrid.y + 1) * (m_gelNodeGrid.z + 1);
+	m_numGelNodes = (m_gelNodeGrid.x + 2) * (m_gelNodeGrid.y + 2) * (m_gelNodeGrid.z + 2);
+	m_boundaryCount = m_gelNodeGrid.x * m_gelNodeGrid.y * m_gelNodeGrid.z - (m_gelNodeGrid.x - 2) * (m_gelNodeGrid.y - 2) * (m_gelNodeGrid.z - 2);
 	m_blockDim = dim3(8, 8, 8);
 
-	m_gridDim_1.x = (m_gelSize.x - 1 + m_blockDim.x - 1) / m_blockDim.x;
-	m_gridDim_1.y = (m_gelSize.y - 1 + m_blockDim.y - 1) / m_blockDim.y;
-	m_gridDim_1.z = (m_gelSize.z - 1 + m_blockDim.z - 1) / m_blockDim.z;
+	m_gridDim_1.x = (m_gelNodeGrid.x - 1 + m_blockDim.x - 1) / m_blockDim.x;
+	m_gridDim_1.y = (m_gelNodeGrid.y - 1 + m_blockDim.y - 1) / m_blockDim.y;
+	m_gridDim_1.z = (m_gelNodeGrid.z - 1 + m_blockDim.z - 1) / m_blockDim.z;
 
-	m_gridDim0.x = (m_gelSize.x + m_blockDim.x - 1) / m_blockDim.x;
-	m_gridDim0.y = (m_gelSize.y + m_blockDim.y - 1) / m_blockDim.y;
-	m_gridDim0.z = (m_gelSize.z + m_blockDim.z - 1) / m_blockDim.z;
+	m_gridDim0.x = (m_gelNodeGrid.x + m_blockDim.x - 1) / m_blockDim.x;
+	m_gridDim0.y = (m_gelNodeGrid.y + m_blockDim.y - 1) / m_blockDim.y;
+	m_gridDim0.z = (m_gelNodeGrid.z + m_blockDim.z - 1) / m_blockDim.z;
 
-	m_gridDim1.x = (m_gelSize.x + 1 + m_blockDim.x - 1) / m_blockDim.x;
-	m_gridDim1.y = (m_gelSize.y + 1 + m_blockDim.y - 1) / m_blockDim.y;
-	m_gridDim1.z = (m_gelSize.z + 1 + m_blockDim.z - 1) / m_blockDim.z;
+	m_gridDim1.x = (m_gelNodeGrid.x + 1 + m_blockDim.x - 1) / m_blockDim.x;
+	m_gridDim1.y = (m_gelNodeGrid.y + 1 + m_blockDim.y - 1) / m_blockDim.y;
+	m_gridDim1.z = (m_gelNodeGrid.z + 1 + m_blockDim.z - 1) / m_blockDim.z;
 
-	m_gridDim2.x = (m_gelSize.x + 2 + m_blockDim.x - 1) / m_blockDim.x;
-	m_gridDim2.y = (m_gelSize.y + 2 + m_blockDim.y - 1) / m_blockDim.y;
-	m_gridDim2.z = (m_gelSize.z + 2 + m_blockDim.z - 1) / m_blockDim.z;
+	m_gridDim2.x = (m_gelNodeGrid.x + 2 + m_blockDim.x - 1) / m_blockDim.x;
+	m_gridDim2.y = (m_gelNodeGrid.y + 2 + m_blockDim.y - 1) / m_blockDim.y;
+	m_gridDim2.z = (m_gelNodeGrid.z + 2 + m_blockDim.z - 1) / m_blockDim.z;
 	m_hgp = new GelParams;
 	memset(m_hgp, 0, sizeof(GelParams));
-	m_hgp->LX = m_gelSize.x;
-	m_hgp->LY = m_gelSize.y;
-	m_hgp->LZ = m_gelSize.z;
+	m_hgp->LX = m_gelNodeGrid.x;
+	m_hgp->LY = m_gelNodeGrid.y;
+	m_hgp->LZ = m_gelNodeGrid.z;
 	m_hgp->I = 0.0;
 	m_hgp->f = 0.9;
 	m_hgp->ep = 0.3;
@@ -506,9 +499,9 @@ Gel::Gel(int3 gelSize, double3 gelPosition, string gelType, int gelId, int time)
 	m_hgp->P2 = 0.77;
 	m_hgp->dt = m_dt;
 	m_hgp->dtx = 5 * m_dt;
-	m_hgp->dx = 1.0;
-	m_hgp->dy = 1.0;
-	m_hgp->dz = 1.0;
+	m_hgp->dx = m_dx;
+	m_hgp->dy = m_dy;
+	m_hgp->dz = m_dz;
 	m_hgp->CH0 = 0.338;
 	m_hgp->CH1 = 0.518;
 	m_hgp->CHS = 0.1;

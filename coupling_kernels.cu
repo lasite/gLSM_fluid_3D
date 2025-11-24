@@ -67,6 +67,10 @@ __global__ void k_add_reaction_to_gel(int* bIndex, double3* Fn, double* un_norm,
 	Fn[id].y = -(double)f.y;
 	Fn[id].z = -(double)f.z;
 	un_norm[id] = -(double)s;
+	//Fn[id].x -= (double)f.x;
+	//Fn[id].y -= (double)f.y;
+	//Fn[id].z -= (double)f.z;
+	//un_norm[id] -= (double)s;
 }
 
 __device__ __forceinline__ float3 to_float3(const double3 a) {

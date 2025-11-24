@@ -64,8 +64,10 @@ public:
     // params
     Coupler* coupler;
     int3 fluidSize;
+    int3 fluidNodeGrid;
     int df;
     float dt;
+    float h;
     int N;
     int Nd;
     float dt_fluid;

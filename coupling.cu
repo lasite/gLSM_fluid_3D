@@ -20,7 +20,7 @@ void Coupler::allocateDeviceStorage()
     cudaMalloc(&d_Cl_all_, sizeof(float) * sumGelBoundaryCount);
     cudaMalloc(&d_Sl_all_, sizeof(float) * sumGelBoundaryCount);
     cudaMalloc(&d_Dl_all_, sizeof(float) * sumGelBoundaryCount);
-    cudaMalloc(&d_bIndex_all_, sizeof(float) * sumGelBoundaryCount);
+    cudaMalloc(&d_bIndex_all_, sizeof(int) * sumGelBoundaryCount);
 }
 
 void Coupler::copyDataToDevice()
@@ -117,7 +117,7 @@ void Coupler::_initialize()
 
 void Coupler::freeHostMemory()
 {
-    free(h_cp);
+    delete h_cp;
 }
 
 void Coupler::freeDeviceMemory()
@@ -135,6 +135,7 @@ void Coupler::freeDeviceMemory()
 void Coupler::_finalize()
 {
     cudaStreamDestroy(coupler_stream);
+    freeHostMemory();
     freeDeviceMemory();
 }
 

@@ -19,10 +19,10 @@ int Fluid::idx3(int x, int y, int z, int Nx, int Ny)
 
 void Fluid::allocateHostStorage()
 {
-cudaHostAlloc((void**)&h_u, N * sizeof(float3), cudaHostAllocPortable);
-memset(h_u, 0, N * sizeof(float3));
-cudaHostAlloc((void**)&h_c1, N * sizeof(float), cudaHostAllocPortable);
-memset(h_c1, 0, N * sizeof(float));
+	cudaHostAlloc((void**)&h_u, N * sizeof(float3), cudaHostAllocPortable);
+	memset(h_u, 0, N * sizeof(float3));
+	cudaHostAlloc((void**)&h_c1, N * sizeof(float), cudaHostAllocPortable);
+	memset(h_c1, 0, N * sizeof(float));
 }
 
 void Fluid::allocateDeviceStorage()
@@ -59,8 +59,9 @@ void Fluid::copyDataToHost()
 
 void Fluid::freeHostMemory()
 {
-cudaFreeHost(h_u);
-cudaFreeHost(h_c1);
+	cudaFreeHost(h_u);
+	cudaFreeHost(h_c1);
+	delete h_fp;
 }
 
 void Fluid::freeDeviceMemory()
@@ -76,6 +77,7 @@ void Fluid::freeDeviceMemory()
 	cudaFree(d_F);
 	cudaFree(d_F_ibm);
 	cudaFree(d_F_tot);
+	cudaFree(d_fp);
 }
 
 void Fluid::recordData(int time)
@@ -89,10 +91,10 @@ void Fluid::recordData(int time)
 		string str_C1 = "Conc" + to_string(time) + ".dat";
 		fC1.open(str_C1);
 		int gi;
-		for (int zi = 0; zi < fluidSize.z; zi++) {
-			for (int yi = 0; yi < fluidSize.y; yi++) {
-				for (int xi = 0; xi < fluidSize.x; xi++) {
-					gi = idx3(xi, yi, zi, fluidSize.x, fluidSize.y);
+		for (int zi = 0; zi < fluidNodeGrid.z; zi++) {
+			for (int yi = 0; yi < fluidNodeGrid.y; yi++) {
+				for (int xi = 0; xi < fluidNodeGrid.x; xi++) {
+					gi = idx3(xi, yi, zi, fluidNodeGrid.x, fluidNodeGrid.y);
 					fVelb << setw(9) << to_string(h_u[gi].x) << "      " << setw(9) << to_string(h_u[gi].y) << "      " << setw(9) << to_string(h_u[gi].z) << "\n";
 					fC1 << setw(9) << to_string(h_c1[gi]) << "\n";
 				}
@@ -131,7 +133,11 @@ d_F_tot(0),
 d_A(0)
 {
 	dt = 1e-3f;
-	N = fluidSize.x * fluidSize.y * fluidSize.z;
+	h = 0.5f;
+	fluidNodeGrid.x = int(fluidSize.x / h) + 1;
+	fluidNodeGrid.y = int(fluidSize.y / h) + 1;
+	fluidNodeGrid.z = int(fluidSize.z / h) + 1;
+	N = fluidNodeGrid.x * fluidNodeGrid.y * fluidNodeGrid.z;
 	Nd = N * 19;
 	threads = coupler->threads;
 	blocksN = (N + threads - 1) / threads;
@@ -147,8 +153,8 @@ d_A(0)
 	h_fp->nu = h_fp->cs2 * (h_fp->tau - 0.5f);
 	h_fp->N = N;
 	h_fp->M = coupler->sumGelBoundaryCount;
-	h_fp->L = fluidSize;
-	h_fp->h = 0.5f;
+	h_fp->L = fluidNodeGrid;
+	h_fp->h = h;
 	h_fp->dx = 1;
 	h_fp->dy = 1;
 	h_fp->dz = 1;
@@ -157,7 +163,7 @@ d_A(0)
 	dx_fluid = 40e-6f * h_fp->h;
 	dt_fluid = (h_fp->tau - 0.5f) * dx_fluid * dx_fluid / (3 * niu);
 	Nsub = int(dt / dt_fluid);
-	h_fp->beta = 1.0f;
+	h_fp->beta = 0.01f;
 	int3 c[19] = {
 	{0,0,0},
 	{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1},

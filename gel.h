@@ -47,7 +47,6 @@ public:
 	GelParams* m_hgp;
 	//chemical variables
 	double* m_hum;
-	double* m_hun_norm;
 	double* m_hvm;
 	double* m_hwm;
 	double* m_hvm_center;
@@ -112,6 +111,10 @@ public:
 	std::string m_gelType;
 	double3 m_gelPosition;
 	int3 m_gelSize;
+	double m_dx;
+	double m_dy;
+	double m_dz;
+	int3 m_gelNodeGrid;
 	double m_dt;
 	int m_df;
 	int m_numGelElements;

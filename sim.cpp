@@ -3,17 +3,26 @@
 #include "coupling.h"
 
 #include <string>
+#include <vector>
+#include <filesystem>
 
 using namespace std;
+namespace fs = std::filesystem;
 
-#define runstep 100000
+#define runstep 1000
 
 int main(int argc, char** argv)
 {
     cudaSetDevice(0);
-    int3    fluidSize = make_int3(301, 101, 21);
-    int3    gelSize1 = make_int3(16, 16, 5);
-    int3    gelSize2 = make_int3(26, 26, 5);
+
+    fs::path baseDir = fs::current_path();
+    fs::path dataDir = baseDir / "data";
+    fs::create_directories(dataDir);
+    fs::current_path(dataDir);
+
+    int3    fluidSize = make_int3(150, 50, 10);
+    int3    gelSize1 = make_int3(15, 15, 4);
+    int3    gelSize2 = make_int3(25, 25, 4);
     double3 gelPos1 = make_double3(50.0, 25.0, 5.0);
     double3 gelPos2 = make_double3(100.0, 25.0, 5.0);
     string  gelType1 = "NIPAAM";
@@ -42,14 +51,18 @@ int main(int argc, char** argv)
         fluid->stepVelocity(iter);
         fluid->stepConcentration();
         coupler->scatterToGels();
+
         for (auto g : gels) {
             g->writeFiles(iter);
         }
         fluid->writeFiles(iter);
     }
+
     delete fluid;
     for (auto g : gels)
         delete g;
     delete coupler;
+    fs::current_path(baseDir);
+
     return 0;
 }

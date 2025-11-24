@@ -2,7 +2,7 @@
 clear; clc;
 
 %% 路径与帧
-data_dir   = 'D:\repos\gLSM_fluid_3D';
+data_dir   = 'D:\repos\gLSM_fluid_3D\data';
 
 % ---------- 修改：两个凝胶 ----------
 fmt_rm1    = 'gel1rm%d.dat';   % 凝胶1
@@ -18,7 +18,7 @@ fps        = 10;
 %% 网格尺寸（示例）
 nx_s1=15; ny_s1=15; nz_s1=4;            % solid 网格点数（两块凝胶各自都是这个尺寸）
 nx_s2=25; ny_s2=25; nz_s2=4;
-nx_f=301; ny_f=101; nz_f=21;      % fluid 网格点数
+nx_f=300; ny_f=100; nz_f=20;      % fluid 网格点数
 
 %% 网格步长与偏移（关键）
 h_s = 1.0;
