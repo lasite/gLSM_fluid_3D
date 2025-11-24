@@ -415,7 +415,7 @@ void Gel::writeFiles(int iter)
 	}
 }
 
-Gel::Gel(int3 gelSize, double3 gelPosition, string gelType, int gelId, int time):
+Gel::Gel(int3 gelSize, double3 gelPosition, int gelType, int gelId, int time):
 	m_gelSize(gelSize),
 	m_gelId(gelId),
 	m_gelPosition(gelPosition),
@@ -506,8 +506,11 @@ Gel::Gel(int3 gelSize, double3 gelPosition, string gelType, int gelId, int time)
 	m_hgp->CH1 = 0.518;
 	m_hgp->CHS = 0.1;
 	m_hgp->C0 = 1.3e-3;
+	m_hgp->c0_bis = 1e-4;
+	m_hgp->b = 0.01;
 	m_hgp->AZ0 = 100.0;
 	m_hgp->FA0 = 0.139;
+	m_hgp->gelType = m_gelType;
 	steadyStateValue(m_hgp->uss, m_hgp->vss, m_hgp->wss, 0);
 	int3 offset[27] = {
 	{ 0, 0, 0 },
@@ -540,7 +543,7 @@ void Gel::stepElasticity(int iter)
 		calServiceNodesPositionD << < m_gridDim2, m_blockDim, 0, m_gel_stream >> > (m_drn, m_dmap_node, m_dgp);
 		calElementPropertiesD << <m_gridDim1, m_blockDim, 0, m_gel_stream >> > (m_drn, m_drm, m_drm_loc, m_dnmSm, m_dVolm, m_dwm, m_dwmp, m_dgp);
 		calPressureD << < m_gridDim_1, m_blockDim, 0, m_gel_stream >> > (m_dPrem, m_dvm, m_dwm, m_dgp);
-		calNodesVelocityD << < m_gridDim0, m_blockDim, 0, m_gel_stream >> > (m_drn, m_dVeln, m_dVels, m_dFn, m_dFn_robin, m_dnmSm, m_dPrem, m_dwm, m_dgp);
+		calNodesVelocityD << < m_gridDim0, m_blockDim, 0, m_gel_stream >> > (m_drn, m_dVeln, m_dVels, m_dFn, m_dFn_robin, m_dnmSm, m_dPrem, m_dwm, m_dvn_norm, m_dgp);
 		calInternalNodesPositionD << < m_gridDim0, m_blockDim, 0, m_gel_stream >> > (m_drn, m_dVeln, m_dgp);
 		calChemBoundaryD << < m_gridDim1, m_blockDim, 0, m_gel_stream >> > (m_dum, m_dum_norm, m_dvm, m_dvm_norm, m_dwm, m_dmap_element, time, m_dgp);
 		calUnnormD << < m_gridDim0, m_blockDim, 0, m_gel_stream >> > (m_dun_norm, m_dun_robin, m_dum_norm, m_dvn_norm, m_dvm_norm, m_dgp);

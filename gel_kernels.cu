@@ -549,10 +549,16 @@ __global__ void calPressureD(double* pm, double* vm, double* wm, GelParams* gp)
 	}
 	int gi = get_index(xi, yi, zi, 1, LX, LY);
 	double wmt = wm[gi];
-	pm[gi] = -(wmt + log(1.0 - wmt) + (gp->CH0 + gp->CH1 * wmt) * wmt * wmt) + gp->C0 * wmt / (2.0 * gp->FA0) + gp->CHS * wmt * vm[gi];
+	if (gp->gelType == 1) {
+		pm[gi] = -(wmt + log(1.0 - wmt) + (gp->CH0 + gp->CH1 * wmt) * wmt * wmt) + gp->C0 * wmt / (2.0 * gp->FA0) + gp->CHS * wmt * vm[gi];
+	}
+	else if (gp->gelType == 2) {
+		double c0 = gp->c0_bis + gp->b * vm[gi];
+		pm[gi] = -(wmt + log(1.0 - wmt) + (gp->CH0 + gp->CH1 * wmt) * wmt * wmt) + c0 * wmt / (2.0 * gp->FA0);
+	}
 }
 
-__global__ void calNodesVelocityD(double3* rn, double3* ven, double3* ves, double3* Fn, double3* Fn_robin, double3* nmSm, double* pm, double* wm, GelParams* gp)
+__global__ void calNodesVelocityD(double3* rn, double3* ven, double3* ves, double3* Fn, double3* Fn_robin, double3* nmSm, double* pm, double* wm, double* vn_norm, GelParams* gp)
 {
 	int xi = threadIdx.x + blockIdx.x * blockDim.x + 1;
 	int yi = threadIdx.y + blockIdx.y * blockDim.y + 1;
@@ -620,10 +626,14 @@ __global__ void calNodesVelocityD(double3* rn, double3* ven, double3* ves, doubl
 		f1n += rn[get_index(xi - 1, yi - 1, zi - 1, 2, LX, LY)] + rn[get_index(xi, yi - 1, zi - 1, 2, LX, LY)] + rn[get_index(xi - 1, yi, zi - 1, 2, LX, LY)] + rn[get_index(xi - 1, yi - 1, zi, 2, LX, LY)] - 4 * rn_m;
 		f2n += pm[get_index(xi - 1, yi - 1, zi - 1, 1, LX, LY)] * (nmSm[gi_nmSm + 1] + nmSm[gi_nmSm + 3] + nmSm[gi_nmSm + 5]);
 	}
-
-	f1n *= pow(gp->dx * gp->dy * gp->dz, 1 / 3) * gp->C0 / 12.;
+	if (gp->gelType == 1) {
+		f1n *= pow(gp->dx * gp->dy * gp->dz, 1 / 3) * gp->C0 / 12.;
+	}
+	else if (gp->gelType == 2) {
+		double c0 = gp->c0_bis + gp->b * vn_norm[gi] * (1 - wn);
+		f1n *= pow(gp->dx * gp->dy * gp->dz, 1 / 3) * c0 / 12.;
+	}
 	f2n /= 4.;
-	//Fn[gi] += f1n + f2n;
 	Fn[gi] = f1n + f2n + Fn_robin[gi];
 	ven[gi] = Mn * Fn[gi];
 	ves[gi] = -wn * ven[gi] / (1 - wn);

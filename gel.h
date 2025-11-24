@@ -8,15 +8,17 @@ struct GelParams {
 	double dt, dtx;
 	double dx, dy, dz;
 	double CH0, CH1, CHS, C0, AZ0, FA0;
+	double c0_bis, b;
 	double uss, vss, wss, I;
 	int3 rn_offset[27];
 	int3 um_offset_noflux[27];
 	int3 um_offset_periodic[27];
+	int gelType;
 };
 
 class Gel {
 public:
-    Gel(int3 gelSize, double3 gelPosition, std::string gelType, int gel_id, int time);
+    Gel(int3 gelSize, double3 gelPosition, int gelType, int gel_id, int time);
     ~Gel();
 
     void _initialize(int time);
@@ -108,7 +110,7 @@ public:
 public:
 	// params
 	int m_gelId;
-	std::string m_gelType;
+	int m_gelType;
 	double3 m_gelPosition;
 	int3 m_gelSize;
 	double m_dx;

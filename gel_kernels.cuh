@@ -5,7 +5,7 @@ __global__ void calElementPropertiesD(double3* rn, double3* rm, double3* rm_loc,
 
 __global__ void calPressureD(double* pm, double* vm, double* wm, GelParams* gp);
 
-__global__ void calNodesVelocityD(double3* rn, double3* ven, double3* ves, double3* Fn, double3* Fn_robin, double3* nmSm, double* pm, double* wm, GelParams* gp);
+__global__ void calNodesVelocityD(double3* rn, double3* ven, double3* ves, double3* Fn, double3* Fn_robin, double3* nmSm, double* pm, double* wm, double* vn_norm, GelParams* gp);
 
 __global__ void calInternalNodesPositionD(double3* rn, double3* ven, GelParams* gp);
 
