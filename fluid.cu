@@ -107,7 +107,7 @@ void Fluid::recordData(int time)
 
 void Fluid::writeFiles(int iter)
 {
-	double time = iter * dt_fluid;
+	double time = iter * dt;
 	if (time == int(time)) {
 		if (file_writer_thread.joinable()) {
 			file_writer_thread.join();
