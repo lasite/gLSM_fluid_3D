@@ -107,13 +107,13 @@ void Fluid::recordData(int time)
 
 void Fluid::writeFiles(int iter)
 {
-	int time = int(iter * dt);
-	if (iter % 1000 == 0) {
+	double time = iter * dt_fluid;
+	if (time == int(time)) {
 		if (file_writer_thread.joinable()) {
 			file_writer_thread.join();
 		}
 		copyDataToHost();
-		file_writer_thread = thread(&Fluid::recordData, this, time);
+		file_writer_thread = thread(&Fluid::recordData, this, int(time));
 	}
 }
 
@@ -163,7 +163,7 @@ d_A(0)
 	dx_fluid = 40e-6f * h_fp->h;
 	dt_fluid = (h_fp->tau - 0.5f) * dx_fluid * dx_fluid / (3 * niu);
 	Nsub = int(dt / dt_fluid);
-	h_fp->beta = 0.01f;
+	h_fp->beta = 1.0f;
 	int3 c[19] = {
 	{0,0,0},
 	{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1},
@@ -199,17 +199,19 @@ void Fluid::_initialize(int time)
 	setInitValue();
 }
 
-void Fluid::stepConcentration()
+void Fluid::stepConcentration(int iter)
 {
-	k_ibm_sample_concentration << <blocksM, threads, 0, fluid_stream >> > (d_c1, coupler->d_Dl_all_, coupler->d_lag_all_, d_fp);
-	k_robin_boundary << <blocksM, threads, 0, fluid_stream >> > (coupler->d_Cl_all_, coupler->d_Dl_all_, coupler->d_Sl_all_, d_fp);
-	k_zero_scalar << <blocksN, threads, 0, fluid_stream >> > (d_source, d_fp);
-	k_ibm_spread_concentration << <blocksM, threads, 0, fluid_stream >> > (d_source, coupler->d_Sl_all_, coupler->d_lag_all_, d_A, d_fp);
-	k_convection_diffusion << <blocksN, threads, 0, fluid_stream >> > (d_u, d_c1, d_c2, d_source, d_fp);
-	swap(d_c1, d_c2);
+	if (iter % 1 == 0) {
+		k_ibm_sample_concentration << <blocksM, threads, 0, fluid_stream >> > (d_c1, coupler->d_Dl_all_, coupler->d_lag_all_, d_fp);
+		k_robin_boundary << <blocksM, threads, 0, fluid_stream >> > (coupler->d_Cl_all_, coupler->d_Dl_all_, coupler->d_Sl_all_, d_fp);
+		k_zero_scalar << <blocksN, threads, 0, fluid_stream >> > (d_source, d_fp);
+		k_ibm_spread_concentration << <blocksM, threads, 0, fluid_stream >> > (d_source, coupler->d_Sl_all_, coupler->d_lag_all_, d_A, d_fp);
+		k_convection_diffusion << <blocksN, threads, 0, fluid_stream >> > (d_u, d_c1, d_c2, d_source, d_fp);
+		swap(d_c1, d_c2);
+	}
 }
 
-void Fluid::stepVelocity(long long int iter)
+void Fluid::stepVelocity(int iter)
 {
 	float ramp = fminf(1, (iter + 1) / 2000.0f);
 	float beta_eff = h_fp->beta * ramp;

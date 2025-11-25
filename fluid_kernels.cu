@@ -285,6 +285,9 @@ __global__ void k_scale_negbeta(float3* Ul, float3* Vl, float3* Fl, float beta_e
 	if (l >= fp->M) return;
 	//Fl[l] = fp->beta * (Vl[l] - Ul[l]);
 	Fl[l] = beta_eff * (Vl[l] - Ul[l]);
+	//if (l == 0) {
+	//	printf("%f, %f, %f\n", Fl[l].x, Fl[l].y, Fl[l].z);
+	//}
 }
 
 __global__ void k_robin_boundary(float* Cl, float* Dl, float* Sl, FluidParams* fp) {

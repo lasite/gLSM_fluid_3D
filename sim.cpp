@@ -9,7 +9,7 @@
 using namespace std;
 namespace fs = std::filesystem;
 
-#define runstep 100000
+#define runstep 10000
 
 int main(int argc, char** argv)
 {
@@ -49,7 +49,7 @@ int main(int argc, char** argv)
         }
         coupler->packFromGels();
         fluid->stepVelocity(iter);
-        fluid->stepConcentration();
+        fluid->stepConcentration(iter);
         coupler->scatterToGels();
 
         for (auto g : gels) {
@@ -57,10 +57,9 @@ int main(int argc, char** argv)
         }
         fluid->writeFiles(iter);
     }
-
-    delete fluid;
     for (auto g : gels)
         delete g;
+    delete fluid;
     delete coupler;
     fs::current_path(baseDir);
 

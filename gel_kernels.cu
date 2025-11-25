@@ -634,7 +634,8 @@ __global__ void calNodesVelocityD(double3* rn, double3* ven, double3* ves, doubl
 		f1n *= pow(gp->dx * gp->dy * gp->dz, 1 / 3) * c0 / 12.;
 	}
 	f2n /= 4.;
-	Fn[gi] = f1n + f2n + Fn_robin[gi];
+	Fn[gi] = f1n + f2n + Fn_robin[gi] / Mn;
+	//Fn[gi] = f1n + f2n;
 	ven[gi] = Mn * Fn[gi];
 	ves[gi] = -wn * ven[gi] / (1 - wn);
 }

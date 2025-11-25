@@ -26,8 +26,8 @@ public:
     Fluid(int3 fluidSize, int time, Coupler* coupler);
     ~Fluid();
     void _initialize(int time);
-    void stepVelocity(long long int iter);
-    void stepConcentration();
+    void stepVelocity(int iter);
+    void stepConcentration(int iter);
     void _finalize();
     void writeFiles(int iter);
 
