@@ -406,7 +406,7 @@ void Gel::recordData(int time)
 void Gel::writeFiles(int iter)
 {
 	double time = iter * m_dt;
-	if (time == int(time)) {
+	if (iter % 1000 == 0) {
 		if (m_file_writer_thread.joinable()) {
 			m_file_writer_thread.join();
 		}
