@@ -498,7 +498,7 @@ Gel::Gel(int3 gelSize, double3 gelPosition, int gelType, int gelId, int time):
 	m_hgp->P1 = 0.0124;
 	m_hgp->P2 = 0.77;
 	m_hgp->dt = m_dt;
-	m_hgp->dtx = 1 * m_dt;
+	m_hgp->dtx = 5 * m_dt;
 	m_hgp->dx = m_dx;
 	m_hgp->dy = m_dy;
 	m_hgp->dz = m_dz;
@@ -539,15 +539,17 @@ void Gel::_initialize(int time)
 void Gel::stepElasticity(int iter)
 {
 	int time = int(iter * m_dt);
-	calServiceNodesPositionD << < m_gridDim2, m_blockDim, 0, m_gel_stream >> > (m_drn, m_dmap_node, m_dgp);
-	calElementPropertiesD << <m_gridDim1, m_blockDim, 0, m_gel_stream >> > (m_drn, m_drm, m_drm_loc, m_dnmSm, m_dVolm, m_dwm, m_dwmp, m_dgp);
-	calPressureD << < m_gridDim_1, m_blockDim, 0, m_gel_stream >> > (m_dPrem, m_dvm, m_dwm, m_dgp);
-	calNodesVelocityD << < m_gridDim0, m_blockDim, 0, m_gel_stream >> > (m_drn, m_dVeln, m_dVels, m_dFn, m_dFn_robin, m_dnmSm, m_dPrem, m_dwm, m_dvn_norm, m_dgp);
-	calInternalNodesPositionD << < m_gridDim0, m_blockDim, 0, m_gel_stream >> > (m_drn, m_dVeln, m_dgp);
-	calChemBoundaryD << < m_gridDim1, m_blockDim, 0, m_gel_stream >> > (m_dum, m_dum_norm, m_dvm, m_dvm_norm, m_dwm, m_dmap_element, time, m_dgp);
-	calUnnormD << < m_gridDim0, m_blockDim, 0, m_gel_stream >> > (m_dun_norm, m_dun_robin, m_dum_norm, m_dvn_norm, m_dvm_norm, m_dgp);
-	calTermsD << < m_gridDim_1, m_blockDim, 0, m_gel_stream >> > (m_dT0m, m_dT1m, m_dT2m, m_dwm, m_dwmp, m_dVeln, m_dnmSm, m_dVolm, m_drm_loc, m_dun_norm, m_dum_norm, m_drm, m_dgp);
-	setZero << < m_gridDim0, m_blockDim, 0, m_gel_stream >> > (m_dun_robin, m_dFn_robin, m_dgp);
+	if (iter % 5 == 0) {
+		calServiceNodesPositionD << < m_gridDim2, m_blockDim, 0, m_gel_stream >> > (m_drn, m_dmap_node, m_dgp);
+		calElementPropertiesD << <m_gridDim1, m_blockDim, 0, m_gel_stream >> > (m_drn, m_drm, m_drm_loc, m_dnmSm, m_dVolm, m_dwm, m_dwmp, m_dgp);
+		calPressureD << < m_gridDim_1, m_blockDim, 0, m_gel_stream >> > (m_dPrem, m_dvm, m_dwm, m_dgp);
+		calNodesVelocityD << < m_gridDim0, m_blockDim, 0, m_gel_stream >> > (m_drn, m_dVeln, m_dVels, m_dFn, m_dFn_robin, m_dnmSm, m_dPrem, m_dwm, m_dvn_norm, m_dgp);
+		calInternalNodesPositionD << < m_gridDim0, m_blockDim, 0, m_gel_stream >> > (m_drn, m_dVeln, m_dgp);
+		calChemBoundaryD << < m_gridDim1, m_blockDim, 0, m_gel_stream >> > (m_dum, m_dum_norm, m_dvm, m_dvm_norm, m_dwm, m_dmap_element, time, m_dgp);
+		calUnnormD << < m_gridDim0, m_blockDim, 0, m_gel_stream >> > (m_dun_norm, m_dun_robin, m_dum_norm, m_dvn_norm, m_dvm_norm, m_dgp);
+		calTermsD << < m_gridDim_1, m_blockDim, 0, m_gel_stream >> > (m_dT0m, m_dT1m, m_dT2m, m_dwm, m_dwmp, m_dVeln, m_dnmSm, m_dVolm, m_drm_loc, m_dun_norm, m_dum_norm, m_drm, m_dgp);
+		setZero << < m_gridDim0, m_blockDim, 0, m_gel_stream >> > (m_dun_robin, m_dFn_robin, m_dgp);
+	}
 }
 
 void Gel::stepChemistry(int iter)

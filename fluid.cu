@@ -213,7 +213,7 @@ void Fluid::stepConcentration(int iter)
 
 void Fluid::stepVelocity(int iter)
 {
-	float ramp = fminf(1, (iter + 1) / 2000.0f);
+	float ramp = fminf(1, (iter + 1) / 20000.0f);
 	float beta_eff = h_fp->beta * ramp;
 	double time = iter * dt;
 	for (int kk = 0; kk < Nsub; kk++) {

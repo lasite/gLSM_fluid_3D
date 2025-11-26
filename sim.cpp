@@ -9,7 +9,7 @@
 using namespace std;
 namespace fs = std::filesystem;
 
-#define runstep 10000
+#define runstep 100000
 
 int main(int argc, char** argv)
 {
