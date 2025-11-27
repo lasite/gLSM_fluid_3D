@@ -29,6 +29,9 @@
   <ItemGroup>
     <ClCompile Include="sim.cpp" />
   </ItemGroup>
+  <ItemGroup>
+    <None Include="README.md" />
+  </ItemGroup>
   <PropertyGroup Label="Globals">
     <ProjectGuid>{4F45668A-D41D-0389-190D-69D613A58804}</ProjectGuid>
     <RootNamespace>gLSM_fluid_3D</RootNamespace>
