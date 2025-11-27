@@ -50,6 +50,7 @@ int main(int argc, char** argv)
         coupler->packFromGels();
         fluid->stepVelocity(iter);
         fluid->stepConcentration(iter);
+        coupler->applyGelRepulsion();
         coupler->scatterToGels();
 
         for (auto g : gels) {

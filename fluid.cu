@@ -55,6 +55,7 @@ void Fluid::copyDataToHost()
 {
 	cudaMemcpyAsync(h_u, d_u, sizeof(float3) * N, cudaMemcpyDeviceToHost, fluid_stream);
 	cudaMemcpyAsync(h_c1, d_c1, sizeof(float) * N, cudaMemcpyDeviceToHost, fluid_stream);
+	cudaStreamSynchronize(fluid_stream);
 }
 
 void Fluid::freeHostMemory()

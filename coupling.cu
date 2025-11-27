@@ -21,6 +21,7 @@ void Coupler::allocateDeviceStorage()
     cudaMalloc(&d_Sl_all_, sizeof(float) * sumGelBoundaryCount);
     cudaMalloc(&d_Dl_all_, sizeof(float) * sumGelBoundaryCount);
     cudaMalloc(&d_bIndex_all_, sizeof(int) * sumGelBoundaryCount);
+    cudaMalloc(&d_owner, sizeof(int) * sumGelBoundaryCount);
 }
 
 void Coupler::copyDataToDevice()
@@ -54,7 +55,10 @@ Coupler::Coupler(std::vector<Gel*>& gels) :
     d_Cl_all_(0),
     d_Sl_all_(0),
     d_Dl_all_(0),
-    d_bIndex_all_(0)
+    d_bIndex_all_(0),
+    d_owner(0),
+    d_cp(0),
+    coupler_stream(0)
 {
     numGels = (int)gels.size();
     sumGelBoundaryCount = 0;
@@ -109,6 +113,7 @@ void Coupler::applyGelRepulsion() {
 
 void Coupler::_initialize()
 {
+    cudaStreamCreate(&coupler_stream);
     allocateHostStorage();
     allocateDeviceStorage();
     setInitValue();
@@ -130,6 +135,8 @@ void Coupler::freeDeviceMemory()
     cudaFree(d_Sl_all_);
     cudaFree(d_Dl_all_);
     cudaFree(d_bIndex_all_);
+    cudaFree(d_owner);
+    cudaFree(d_cp);
 }
 
 void Coupler::_finalize()

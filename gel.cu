@@ -456,7 +456,8 @@ Gel::Gel(int3 gelSize, double3 gelPosition, int gelType, int gelId, int time):
 	m_dPrem(0),
 	m_dmap_element(0),
 	m_dmap_node(0),
-	m_dbIndex(0)
+	m_dbIndex(0),
+	m_gel_stream(0)
 {
 	m_dt = 1e-3;
 	m_df = int(1 / m_dt);
@@ -506,7 +507,7 @@ Gel::Gel(int3 gelSize, double3 gelPosition, int gelType, int gelId, int time):
 	m_hgp->CH1 = 0.518;
 	m_hgp->CHS = 0.1;
 	m_hgp->C0 = 1.3e-3;
-	m_hgp->c0_bis = 1e-4;
+	m_hgp->c0_bis = 5e-4;
 	m_hgp->b = 0.01;
 	m_hgp->AZ0 = 100.0;
 	m_hgp->FA0 = 0.139;
@@ -548,8 +549,8 @@ void Gel::stepElasticity(int iter)
 		calChemBoundaryD << < m_gridDim1, m_blockDim, 0, m_gel_stream >> > (m_dum, m_dum_norm, m_dvm, m_dvm_norm, m_dwm, m_dmap_element, time, m_dgp);
 		calUnnormD << < m_gridDim0, m_blockDim, 0, m_gel_stream >> > (m_dun_norm, m_dun_robin, m_dum_norm, m_dvn_norm, m_dvm_norm, m_dgp);
 		calTermsD << < m_gridDim_1, m_blockDim, 0, m_gel_stream >> > (m_dT0m, m_dT1m, m_dT2m, m_dwm, m_dwmp, m_dVeln, m_dnmSm, m_dVolm, m_drm_loc, m_dun_norm, m_dum_norm, m_drm, m_dgp);
-		setZero << < m_gridDim0, m_blockDim, 0, m_gel_stream >> > (m_dun_robin, m_dFn_robin, m_dgp);
 	}
+	setZero << < m_gridDim0, m_blockDim, 0, m_gel_stream >> > (m_dun_robin, m_dFn_robin, m_dgp);
 }
 
 void Gel::stepChemistry(int iter)

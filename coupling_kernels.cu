@@ -19,14 +19,14 @@ __global__ void k_add_reaction_to_gel(int* bIndex, double3* Fn, double* un_norm,
 	float3 f = Fl[l];
 	float s = Sl[l];
 
-	Fn[id].x = -(double)f.x;
-	Fn[id].y = -(double)f.y;
-	Fn[id].z = -(double)f.z;
-	un_norm[id] = -(double)s;
-	//Fn[id].x -= (double)f.x;
-	//Fn[id].y -= (double)f.y;
-	//Fn[id].z -= (double)f.z;
-	//un_norm[id] -= (double)s;
+	//Fn[id].x = -(double)f.x;
+	//Fn[id].y = -(double)f.y;
+	//Fn[id].z = -(double)f.z;
+	//un_norm[id] = -(double)s;
+	Fn[id].x -= (double)f.x;
+	Fn[id].y -= (double)f.y;
+	Fn[id].z -= (double)f.z;
+	un_norm[id] -= (double)s;
 }
 
 __device__ __forceinline__ float3 to_float3(const double3 a) {
@@ -52,51 +52,89 @@ __global__ void k_gather_boundary(int* bIndex, double3* rn, double3* vn, double*
 	Cl[l] = __double2float_rn(u);
 }
 
-__device__ __forceinline__ void atomicAdd_float3(float3* p, const float3 v) {
-	atomicAdd(&p->x, v.x);
-	atomicAdd(&p->y, v.y);
-	atomicAdd(&p->z, v.z);
+__device__ inline void bodyBodyInteraction(
+    float3 posA, float3 posB,
+    int ownerA, int ownerB,
+    float3& force_acc,
+    float delta, float gamma, float rc2, float sig2)
+{
+    if (ownerA == ownerB) return;
+
+    float3 d;
+    d.x = posA.x - posB.x;
+    d.y = posA.y - posB.y;
+    d.z = posA.z - posB.z;
+
+    float distSqr = d.x * d.x + d.y * d.y + d.z * d.z;
+
+    if (distSqr <= 0.0f || distSqr >= rc2) return;
+
+    float invDistSqr = 1.0f / distSqr;
+    float sr2 = sig2 * invDistSqr;
+    float sr6 = sr2 * sr2 * sr2;
+    float sr12 = sr6 * sr6;
+
+    float fac = 24.0f * delta * (2.0f * sr12 - sr6) * invDistSqr;
+
+    force_acc.x += fac * d.x;
+    force_acc.y += fac * d.y;
+    force_acc.z += fac * d.z;
 }
 
 __global__ void k_gel_repulsion(float3* lag, int* owner, float3* Fl, CouplerParams* cp)
 {
-    const int a = blockDim.x * blockIdx.x + threadIdx.x;
-    if (a >= cp->M) return;
+    int a = blockDim.x * blockIdx.x + threadIdx.x;
 
-    const int oa = owner[a];
-    const float3 xa = make_float3((double)lag[a].x,
-                                    (double)lag[a].y,
-                                    (double)lag[a].z);
+    float3 pos_a;
+    int owner_a;
+    float3 force = make_float3(0.0f, 0.0f, 0.0f);
 
-    // 从 cp 取 δ/γ，并设定截断
-    const double epsilon = cp->delta;    // δ = 1e-4
-    const double sigma   = cp->gamma;    // γ = 1.5
-	const double rcut = 2.5 * sigma;             // 典型截断
-	const double rc2 = rcut * rcut;
-	const double sig2 = sigma * sigma;
+    const float delta = (float)cp->delta;
+    const float gamma = (float)cp->gamma;
+    const float rcut = 2.5f * gamma;
+    const float rc2 = rcut * rcut;
+    const float sig2 = gamma * gamma;
+    const int M = cp->M;
 
-    for (int b = a + 1; b < cp->M; ++b) {
-        const int ob = owner[b];
-        if (ob == oa) continue; // 同 owner 不相互作用
-        const float3 xb = make_float3((double)lag[b].x,
-                                        (double)lag[b].y,
-                                        (double)lag[b].z);
+    if (a < M) {
+        pos_a = lag[a];
+        owner_a = owner[a];
+    }
 
-        const double dx = xa.x - xb.x;
-        const double dy = xa.y - xb.y;
-        const double dz = xa.z - xb.z;
-        const double r2 = dx*dx + dy*dy + dz*dz;
-        if (r2 <= 0.0 || r2 >= rc2) continue; // 避免 r=0 & 截断外
+    __shared__ float3 sharedPos[256];
+    __shared__ int    sharedOwner[256];
 
-        // Lennard–Jones 力：F = 24ε[2(σ/r)^12 - (σ/r)^6] * (r_vec / r^2)
-        const double inv_r2 = 1.0 / r2;
-        const double sr2    = sig2 * inv_r2;           // (σ/r)^2
-        const double sr6    = sr2 * sr2 * sr2;         // (σ/r)^6
-        const double sr12   = sr6 * sr6;               // (σ/r)^12
-        const double fac    = 24.0 * epsilon * (2.0*sr12 - sr6) * inv_r2;
+    for (int tile = 0; tile < (M + blockDim.x - 1) / blockDim.x; ++tile) {
+        int b_idx = tile * blockDim.x + threadIdx.x;
 
-        float3 F = make_float3(fac*dx, fac*dy, fac*dz);
-		atomicAdd_float3(&Fl[a], F);
-		atomicAdd_float3(&Fl[b], -1*F);
+        if (b_idx < M) {
+            sharedPos[threadIdx.x] = lag[b_idx];
+            sharedOwner[threadIdx.x] = owner[b_idx];
+        }
+        else {
+            sharedPos[threadIdx.x] = make_float3(0, 0, 0);
+            sharedOwner[threadIdx.x] = -1;
+        }
+
+        __syncthreads();
+
+        if (a < M) {
+#pragma unroll
+            for (int k = 0; k < blockDim.x; ++k) {
+                if (sharedOwner[k] != -1) {
+                    bodyBodyInteraction(pos_a, sharedPos[k],
+                        owner_a, sharedOwner[k],
+                        force, delta, gamma, rc2, sig2);
+                }
+            }
+        }
+
+        __syncthreads();
+    }
+
+    if (a < M) {
+        atomicAdd(&(Fl[a].x), force.x);
+        atomicAdd(&(Fl[a].y), force.y);
+        atomicAdd(&(Fl[a].z), force.z);
     }
 }
