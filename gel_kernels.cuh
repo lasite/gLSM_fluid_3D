@@ -21,4 +21,8 @@ __global__ void calUnnormD(double* un_norm, double* un_robin, double* um_norm, d
 
 __global__ void setZero(double* un_robin, double3* Fn_robin, GelParams* gp);
 
+__global__ void recordCenterElementD(double* vm_center, double* wm_center, double3* rm_center, double3* Fn_center, double3* Veln_center, double* vm, double* wm, double3* rm, double3* Fn, double3* Veln, int time, GelParams* gp);
+
+__global__ void calFilamentD(double* vn_norm, double* un_norm, double3* filament, int time, unsigned int* hitCnt, GelParams* gp);
+
 #endif

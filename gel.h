@@ -14,6 +14,7 @@ struct GelParams {
 	int3 um_offset_noflux[27];
 	int3 um_offset_periodic[27];
 	int gelType;
+	int maxFilamentlen;
 };
 
 class Gel {
@@ -22,8 +23,10 @@ public:
     ~Gel();
 
     void _initialize(int time);
+	void setGoonValue(int time);
 	void stepChemistry(int iter);
 	void stepElasticity(int iter);
+	void recordCenter(int iter);
     void _finalize();
 	void writeFiles(int iter);
 
@@ -53,6 +56,7 @@ public:
 	double* m_hwm;
 	double* m_hvm_center;
 	double* m_hwm_center;
+	double3* m_hfilament;
 
 	//dynamics variables
 	double3* m_hrn;
@@ -86,6 +90,7 @@ public:
 	double* m_dT0m;
 	double* m_dT1m;
 	double* m_dT2m;
+	double3* m_dfilament;
 
 	//dynamics variables
 	double3* m_drn;
@@ -105,7 +110,6 @@ public:
 	int* m_dmap_node;
 	int* m_dmap_element;
 	int* m_dbIndex;
-    double* m_dtime;
 
 public:
 	// params
@@ -129,4 +133,6 @@ public:
 	dim3 m_gridDim0;
 	dim3 m_gridDim1;
 	dim3 m_gridDim2;
+	bool flag = false;
+	unsigned int* d_hitCnt;
 };

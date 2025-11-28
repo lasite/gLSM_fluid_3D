@@ -51,6 +51,34 @@ void Fluid::setInitValue()
 	k_init << <blocksN, threads, 0, fluid_stream >> > (d_f, d_rho, d_u, d_c1, d_c2, d_fp);
 }
 
+void Fluid::setGoonValue(int time)
+{
+	k_init << <blocksN, threads, 0, fluid_stream >> > (d_f, d_rho, d_u, d_c1, d_c2, d_fp);
+
+	string str_Velb = "Velb" + to_string(time) + ".dat";
+	string str_C1 = "Conc" + to_string(time) + ".dat";
+
+	ifstream fVelb(str_Velb);
+	ifstream fC1(str_C1);
+
+	int gi;
+	for (int zi = 0; zi < fluidNodeGrid.z; zi++) {
+		for (int yi = 0; yi < fluidNodeGrid.y; yi++) {
+			for (int xi = 0; xi < fluidNodeGrid.x; xi++) {
+				gi = idx3(xi, yi, zi, fluidNodeGrid.x, fluidNodeGrid.y);
+				fVelb >> h_u[gi].x >> h_u[gi].y >> h_u[gi].z;
+				fC1 >> h_c1[gi];
+			}
+		}
+	}
+
+	fVelb.close();
+	fC1.close();
+
+	cudaMemcpy(d_u, h_u, sizeof(float3) * N, cudaMemcpyHostToDevice);
+	cudaMemcpy(d_c1, h_c1, sizeof(float) * N, cudaMemcpyHostToDevice);
+}
+
 void Fluid::copyDataToHost()
 {
 	cudaMemcpyAsync(h_u, d_u, sizeof(float3) * N, cudaMemcpyDeviceToHost, fluid_stream);
@@ -197,7 +225,10 @@ void Fluid::_initialize(int time)
 	allocateDeviceStorage();
 	cudaStreamCreate(&fluid_stream);
 	copyDataToDevice();
-	setInitValue();
+	if (time)
+		setGoonValue(time);
+	else
+		setInitValue();
 }
 
 void Fluid::stepConcentration(int iter)

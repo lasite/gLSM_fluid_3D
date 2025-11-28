@@ -22,6 +22,9 @@ void Gel::allocateHostStorage()
 	m_hwm = new double[m_numGelElements];
 	memset(m_hwm, 0, m_numGelElements * sizeof(double));
 
+	m_hfilament = new double3[1000 * m_hgp->maxFilamentlen];
+	memset(m_hfilament, 0, 1000 * m_hgp->maxFilamentlen * sizeof(double3));
+
 	//dynamics variables
 	m_hrn = new double3[m_numGelNodes];
 	memset(m_hrn, 0, m_numGelNodes * sizeof(double3));
@@ -64,6 +67,7 @@ void Gel::allocateDeviceStorage()
 	cudaMalloc((void**)&m_dT0m, m_numGelElements * sizeof(double));
 	cudaMalloc((void**)&m_dT1m, m_numGelElements * sizeof(double));
 	cudaMalloc((void**)&m_dT2m, m_numGelElements * sizeof(double));
+	cudaMalloc((void**)&m_dfilament, 1000 * m_hgp->maxFilamentlen * sizeof(double3));
 
 	//dynamics variables
 	cudaMalloc((void**)&m_drn, m_numGelNodes * sizeof(double3));
@@ -82,6 +86,13 @@ void Gel::allocateDeviceStorage()
 
 	cudaMalloc((void**)&m_dmap_element, m_numGelElements * sizeof(int));
 	cudaMalloc((void**)&m_dmap_node, m_numGelNodes * sizeof(int));
+
+	cudaMalloc((void**)&m_dvm_center, 1000 * sizeof(double));
+	cudaMalloc((void**)&m_dwm_center, 1000 * sizeof(double));
+	cudaMalloc((void**)&m_drm_center, 1000 * sizeof(double3));
+	cudaMalloc((void**)&m_dFn_center, 1000 * sizeof(double3));
+	cudaMalloc((void**)&m_dVeln_center, 1000 * sizeof(double3));
+	cudaMalloc(&d_hitCnt, sizeof(unsigned int));
 
 	cudaMalloc(&m_dbIndex, m_boundaryCount * sizeof(int));
 }
@@ -188,9 +199,70 @@ void Gel::setInitValue()
         //set node type
         setType(m_hmap_node, 2);
         setType(m_hmap_element, 1);
-
-        // build the list of boundary nodes that the coupler needs to sample
         buildBoundaryIndex();
+}
+
+void Gel::setGoonValue(int time)
+{
+	int LX = m_gelNodeGrid.x;
+	int LY = m_gelNodeGrid.y;
+	int LZ = m_gelNodeGrid.z;
+	ifstream frn, fum, fvm, fwm;
+	string str_rn, str_um, str_vm, str_wm;
+	str_rn = "gel" + to_string(m_gelId) + "rn" + to_string(time) + ".dat";
+	str_um = "gel" + to_string(m_gelId) + "um" + to_string(time) + ".dat";
+	str_vm = "gel" + to_string(m_gelId) + "vm" + to_string(time) + ".dat";
+	str_wm = "gel" + to_string(m_gelId) + "wm" + to_string(time) + ".dat";
+	frn.open(str_rn, ios::in);
+	fvm.open(str_vm, ios::in);
+	fum.open(str_um, ios::in);
+	fwm.open(str_wm, ios::in);
+	string line;
+	for (int zi = 1; zi < LZ; zi++) {
+		for (int yi = 1; yi < LY; yi++) {
+			for (int xi = 1; xi < LX; xi++) {
+				int gi = get_index(xi, yi, zi, 1);
+				double um, vm, wm;
+				getline(fum, line);
+				istringstream iss1(line);
+				iss1 >> um;
+				m_hum[gi] = um;
+
+				getline(fvm, line);
+				istringstream iss2(line);
+				iss2 >> vm;
+				m_hvm[gi] = vm;
+
+				getline(fwm, line);
+				istringstream iss3(line);
+				iss3 >> wm;
+				m_hwm[gi] = wm;
+			}
+		}
+	}
+
+	for (int zi = 1; zi < LZ + 1; zi++) {
+		for (int yi = 1; yi < LY + 1; yi++) {
+			for (int xi = 1; xi < LX + 1; xi++) {
+				int gi = get_index(xi, yi, zi, 2);
+				double rnx, rny, rnz;
+				getline(frn, line);
+				istringstream iss4(line);
+				iss4 >> rnx >> rny >> rnz;
+				m_hrn[gi] = make_double3(rnx, rny, rnz);
+			}
+		}
+	}
+
+	frn.close();
+	fvm.close();
+	fum.close();
+	fwm.close();
+
+	//set node type
+	setType(m_hmap_node, 2);
+	setType(m_hmap_element, 1);
+	buildBoundaryIndex();
 }
 
 void Gel::setType(int* a, int size)
@@ -272,6 +344,7 @@ void Gel::copyDataToHost()
 	cudaMemcpyAsync(m_hum, m_dum, sizeof(double) * m_numGelElements, cudaMemcpyDeviceToHost, m_gel_stream);
 	cudaMemcpyAsync(m_hvm, m_dvm, sizeof(double) * m_numGelElements, cudaMemcpyDeviceToHost, m_gel_stream);
 	cudaMemcpyAsync(m_hwm, m_dwm, sizeof(double) * m_numGelElements, cudaMemcpyDeviceToHost, m_gel_stream);
+	cudaMemcpyAsync(m_hfilament, m_dfilament, sizeof(double3) * 1000 * m_hgp->maxFilamentlen, cudaMemcpyDeviceToHost, m_gel_stream);
 	cudaMemcpyAsync(m_hrm, m_drm, sizeof(double3) * m_numGelElements, cudaMemcpyDeviceToHost, m_gel_stream);
 	cudaMemcpyAsync(m_hrn, m_drn, sizeof(double3) * m_numGelNodes, cudaMemcpyDeviceToHost, m_gel_stream);
 	cudaMemcpyAsync(m_hFn, m_dFn, sizeof(double3) * m_numGelNodes, cudaMemcpyDeviceToHost, m_gel_stream);
@@ -284,6 +357,7 @@ void Gel::freeHostMemory()
 	delete[] m_hum;
 	delete[] m_hvm;
 	delete[] m_hwm;
+	delete[] m_hfilament;
 	delete[] m_hrn;
 	delete[] m_hrm;
 	delete[] m_hFn;
@@ -305,6 +379,7 @@ void Gel::freeDeviceMemory()
 	cudaFree(m_dvn_norm);
 	cudaFree(m_dwm);
 	cudaFree(m_dwmp);
+	cudaFree(m_dfilament);
 	cudaFree(m_dT0m);
 	cudaFree(m_dT1m);
 	cudaFree(m_dT2m);
@@ -354,6 +429,9 @@ double Gel::fu_h(double u, double v, double w, double phi)
 
 void Gel::recordData(int time)
 {
+	int LX = m_gelNodeGrid.x;
+	int LY = m_gelNodeGrid.y;
+	int LZ = m_gelNodeGrid.z;
 	if (time % 1 == 0) {
 		ofstream frn, frm, fum, fvm, fwm, fFn, fVeln;
 		string str_rn, str_rm, str_um, str_vm, str_wm, str_Fn, str_Veln;
@@ -372,9 +450,9 @@ void Gel::recordData(int time)
 		fFn.open(str_Fn);
 		fVeln.open(str_Veln);
 		int gi;
-		for (int zi = 1; zi < m_gelNodeGrid.z + 1; zi++) {
-			for (int yi = 1; yi < m_gelNodeGrid.y + 1; yi++) {
-				for (int xi = 1; xi < m_gelNodeGrid.x + 1; xi++) {
+		for (int zi = 1; zi < LZ + 1; zi++) {
+			for (int yi = 1; yi < LY + 1; yi++) {
+				for (int xi = 1; xi < LX + 1; xi++) {
 					gi = get_index(xi, yi, zi, 2);
 					frn << setw(9) << to_string(m_hrn[gi].x) << "      " << setw(9) << to_string(m_hrn[gi].y) << "      " << setw(9) << to_string(m_hrn[gi].z) << "\n";
 					fFn << setw(9) << to_string(m_hFn[gi].x) << "      " << setw(9) << to_string(m_hFn[gi].y) << "      " << setw(9) << to_string(m_hFn[gi].z) << "\n";
@@ -382,9 +460,9 @@ void Gel::recordData(int time)
 				}
 			}
 		}
-		for (int zi = 1; zi < m_gelNodeGrid.z; zi++) {
-			for (int yi = 1; yi < m_gelNodeGrid.y; yi++) {
-				for (int xi = 1; xi < m_gelNodeGrid.x; xi++) {
+		for (int zi = 1; zi < LZ; zi++) {
+			for (int yi = 1; yi < LY; yi++) {
+				for (int xi = 1; xi < LX; xi++) {
 					gi = get_index(xi, yi, zi, 1);
 					frm << setw(9) << to_string(m_hrm[gi].x) << "      " << setw(9) << to_string(m_hrm[gi].y) << "      " << setw(9) << to_string(m_hrm[gi].z) << "\n";
 					fum << setw(9) << to_string(m_hum[gi]) << "\n";
@@ -400,6 +478,43 @@ void Gel::recordData(int time)
 		fwm.close();
 		fFn.close();
 		fVeln.close();
+	}
+
+	if (flag && time % 1000 == 0) {
+		ofstream fbodycenter;
+		ofstream ffilament;
+		string str_filament;
+		fbodycenter.open("gel" + to_string(m_gelId) + "bodycenter" + ".dat", ios::app);
+
+		for (int i = 0; i < 1000; i++) {
+			fbodycenter
+				<< setw(9) << to_string(time - 1000 + i * 1) << "      "
+				<< setw(9) << to_string(m_hrm_center[i].x) << "      "
+				<< setw(9) << to_string(m_hrm_center[i].y) << "      "
+				<< setw(9) << to_string(m_hrm_center[i].z) << "      "
+				<< setw(9) << to_string(m_hFn_center[i].x) << "      "
+				<< setw(9) << to_string(m_hFn_center[i].y) << "      "
+				<< setw(9) << to_string(m_hFn_center[i].z) << "      "
+				<< setw(9) << to_string(m_hVeln_center[i].x) << "      "
+				<< setw(9) << to_string(m_hVeln_center[i].y) << "      "
+				<< setw(9) << to_string(m_hVeln_center[i].z) << "      "
+				<< setw(9) << to_string(m_hvm_center[i]) << "      "
+				<< setw(9) << to_string(m_hwm_center[i]) << "\n";
+
+			//str_filament = "gel" + to_string(m_gelId) + "filament" + to_string(int(time) - 1000 + i * 1) + ".dat";
+			//ffilament.open(str_filament);
+			//for (int j = 0; j < m_hgp->maxFilamentlen; j++) {
+			//	int gi = m_hgp->maxFilamentlen * i + j;
+			//	if (m_hfilament[gi].x != 0) {
+			//		ffilament << setw(9) << to_string(m_hfilament[gi].x) << "      " << setw(9) << to_string(m_hfilament[gi].y) << "      " << setw(9) << to_string(m_hfilament[gi].z) << "\n";
+			//	}
+			//}
+			//ffilament.close();
+		}
+		fbodycenter.close();
+	}
+	else {
+		flag = true;
 	}
 }
 
@@ -424,6 +539,7 @@ Gel::Gel(int3 gelSize, double3 gelPosition, int gelType, int gelId, int time):
 	m_hum(0),
 	m_hvm(0),
 	m_hwm(0),
+	m_hfilament(0),
 	m_hrn(0),
 	m_hrm(0),
 	m_hFn(0),
@@ -511,6 +627,7 @@ Gel::Gel(int3 gelSize, double3 gelPosition, int gelType, int gelId, int time):
 	m_hgp->b = 0.01;
 	m_hgp->AZ0 = 100.0;
 	m_hgp->FA0 = 0.139;
+	m_hgp->maxFilamentlen = 300;
 	m_hgp->gelType = m_gelType;
 	steadyStateValue(m_hgp->uss, m_hgp->vss, m_hgp->wss, 0);
 	int3 offset[27] = {
@@ -533,7 +650,10 @@ void Gel::_initialize(int time)
 	allocateHostStorage();
 	allocateDeviceStorage();
 	cudaStreamCreate(&m_gel_stream);
-	setInitValue();
+	if (time)
+		setGoonValue(time);
+	else
+		setInitValue();
 	copyDataToDevice();
 }
 
@@ -557,6 +677,15 @@ void Gel::stepChemistry(int iter)
 {
 	int time = int(iter * m_dt);
 	calChemD << < m_gridDim_1, m_blockDim, 0, m_gel_stream >> > (m_dvm, m_dum, m_dwm, m_dT0m, m_dT1m, m_dT2m, m_drm, time, m_dgp);
+}
+
+void Gel::recordCenter(int iter)
+{
+	if (iter % 1000 == 0) {
+		recordCenterElementD << < dim3(1, 1, 1), dim3(1, 1, 1), 0, m_gel_stream >> > (m_dvm_center, m_dwm_center, m_drm_center, m_dFn_center, m_dVeln_center, m_dvm, m_dwm, m_drn, m_dFn, m_dVeln, (iter / 1000) % 1000, m_dgp);
+		cudaMemset(d_hitCnt, 0, sizeof(unsigned int));
+		calFilamentD << <m_gridDim_1, m_blockDim, 0, m_gel_stream >> > (m_dvn_norm, m_dun_norm, m_dfilament, (iter / 1000) % 1000, d_hitCnt, m_dgp);
+	}
 }
 
 void Gel::_finalize()

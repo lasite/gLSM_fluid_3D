@@ -37,6 +37,7 @@ public:
     void freeHostMemory();
     void freeDeviceMemory();
     void setInitValue();
+    void setGoonValue(int time);
     void copyDataToDevice();
     void copyDataToHost();
     void recordData(int time);

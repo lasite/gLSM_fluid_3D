@@ -9,24 +9,9 @@ __device__ static double3 operator+(double3 a, double3 b)
 	return make_double3(a.x + b.x, a.y + b.y, a.z + b.z);
 }
 
-__device__ static float3 operator+(float3 a, float3 b)
-{
-	return make_float3(a.x + b.x, a.y + b.y, a.z + b.z);
-}
-
-__device__ static int3 operator+(int3 a, int3 b)
-{
-	return make_int3(a.x + b.x, a.y + b.y, a.z + b.z);
-}
-
 __device__ static double3 operator-(double3 a, double3 b)
 {
 	return make_double3(a.x - b.x, a.y - b.y, a.z - b.z);
-}
-
-__device__ static float3 operator-(float3 a, float3 b)
-{
-	return make_float3(a.x - b.x, a.y - b.y, a.z - b.z);
 }
 
 __device__ static double3 operator-(double3 a)
@@ -39,47 +24,12 @@ __device__ static double3 operator*(double a, double3 b)
 	return make_double3(a * b.x, a * b.y, a * b.z);
 }
 
-__device__ static double3 operator*(double a, int3 b)
-{
-	return make_double3(a * b.x, a * b.y, a * b.z);
-}
-
-__device__ static float3 operator*(float a, int3 b)
-{
-	return make_float3(a * b.x, a * b.y, a * b.z);
-}
-
-__device__ static float3 operator*(float a, float3 b)
-{
-	return make_float3(a * b.x, a * b.y, a * b.z);
-}
-
 __device__ static double3 operator*(double3 a, double b)
 {
 	return make_double3(a.x * b, a.y * b, a.z * b);
 }
 
-__device__ static float3 operator*(float3 a, float b)
-{
-	return make_float3(a.x * b, a.y * b, a.z * b);
-}
-
 __device__ static double operator*(double3 a, double3 b)
-{
-	return a.x * b.x + a.y * b.y + a.z * b.z;
-}
-
-__device__ static float operator*(float3 a, float3 b)
-{
-	return a.x * b.x + a.y * b.y + a.z * b.z;
-}
-
-__device__ static double operator*(int3 a, double3 b)
-{
-	return a.x * b.x + a.y * b.y + a.z * b.z;
-}
-
-__device__ static float operator*(int3 a, float3 b)
 {
 	return a.x * b.x + a.y * b.y + a.z * b.z;
 }
@@ -94,24 +44,12 @@ __device__ static double3 operator/(double3 a, double b)
 	return make_double3(a.x / b, a.y / b, a.z / b);
 }
 
-__device__ static float3 operator/(float3 a, float b)
-{
-	return make_float3(a.x / b, a.y / b, a.z / b);
-}
-
 __device__ static double3 operator^(double3 a, double3 b)
 {
 	return make_double3(a.x * b.x, a.y * b.y, a.z * b.z);
 }
 
 __device__ static void operator+=(double3& a, double3 b)
-{
-	a.x += b.x;
-	a.y += b.y;
-	a.z += b.z;
-}
-
-__device__ static void operator+=(float3& a, float3 b)
 {
 	a.x += b.x;
 	a.y += b.y;
@@ -855,4 +793,49 @@ __global__ void calUnnormD(double* un_norm, double* un_robin, double* um_norm, d
 	}
 	un_norm[get_index(xi, yi, zi, 2, LX, LY)] = dun_norm / 8 + un_robin[get_index(xi, yi, zi, 2, LX, LY)];
 	vn_norm[get_index(xi, yi, zi, 2, LX, LY)] = dvn_norm / 8;
+}
+
+__global__ void recordCenterElementD(double* vm_center, double* wm_center, double3* rm_center, double3* Fn_center, double3* Veln_center, double* vm, double* wm, double3* rn, double3* Fn, double3* Veln, int time, GelParams* gp)
+{
+	int LX = gp->LX;
+	int LY = gp->LY;
+	int LZ = gp->LZ;
+	int gi = get_index(LX / 2, LY / 2, LZ / 2, 1, LX, LY);
+	int hi = get_index((LX + 1) / 2, (LY + 1) / 2, (LZ + 1) / 2, 2, LX, LY);
+	vm_center[time] = vm[gi];
+	wm_center[time] = wm[gi];
+	rm_center[time] = rn[hi];
+	Fn_center[time] = Fn[hi];
+	Veln_center[time] = Veln[hi];
+}
+
+__global__ void calFilamentD(double* vn_norm, double* un_norm, double3* filament, int time, unsigned int* hitCnt, GelParams* gp)
+{
+	int xi = threadIdx.x + blockIdx.x * blockDim.x + 1;
+	int yi = threadIdx.y + blockIdx.y * blockDim.y + 1;
+	int zi = threadIdx.z + blockIdx.z * blockDim.z + 1;
+	int LX = gp->LX;
+	int LY = gp->LY;
+	int LZ = gp->LZ;
+	if (xi > LX - 1 || yi > LY - 1 || zi > LZ - 1) {
+		return;
+	}
+	double Viso = 0.15;
+	double u00 = un_norm[get_index(xi, yi, zi, 2, LX, LY)];
+	double u10 = un_norm[get_index(xi + 1, yi, zi, 2, LX, LY)];
+	double u01 = un_norm[get_index(xi, yi + 1, zi, 2, LX, LY)];
+	double u11 = un_norm[get_index(xi + 1, yi + 1, zi, 2, LX, LY)];
+	double v00 = vn_norm[get_index(xi, yi, zi, 2, LX, LY)];
+	double v10 = vn_norm[get_index(xi + 1, yi, zi, 2, LX, LY)];
+	double v01 = vn_norm[get_index(xi, yi + 1, zi, 2, LX, LY)];
+	double v11 = vn_norm[get_index(xi + 1, yi + 1, zi, 2, LX, LY)];
+
+	double xb, yb;
+	bool ok = solveBilinear(u00, u10, u01, u11, v00, v10, v01, v11, Viso, xb, yb);
+	if (ok) {
+		unsigned int gi = atomicAdd(hitCnt, 1u);
+		filament[time * gp->maxFilamentlen + gi].x = xi + xb;
+		filament[time * gp->maxFilamentlen + gi].y = yi + yb;
+		filament[time * gp->maxFilamentlen + gi].z = zi;
+	}
 }
