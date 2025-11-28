@@ -9,7 +9,7 @@
 using namespace std;
 namespace fs = std::filesystem;
 
-#define runstep 100000
+#define runstep 2000000
 
 int main(int argc, char** argv)
 {
@@ -21,12 +21,12 @@ int main(int argc, char** argv)
     fs::current_path(dataDir);
 
     int3    fluidSize = make_int3(150, 50, 10);
-    int3    gelSize1 = make_int3(15, 15, 4);
-    int3    gelSize2 = make_int3(25, 25, 4);
+    int3    gelSize1 = make_int3(20, 20, 4);
+    int3    gelSize2 = make_int3(20, 20, 4);
     double3 gelPos1 = make_double3(50.0, 25.0, 5.0);
     double3 gelPos2 = make_double3(100.0, 25.0, 5.0);
-    int  gelType1 = 1;
-    int  gelType2 = 2;
+    int     gelType1 = 1;
+    int     gelType2 = 2;
     int     gelId1 = 1;
     int     gelId2 = 2;
     int     startTime = 0;
@@ -41,11 +41,12 @@ int main(int argc, char** argv)
     Coupler* coupler = new Coupler(gels);
     Fluid* fluid = new Fluid(fluidSize, startTime, coupler);
 
-    for (int iter = 0; iter <= runstep; ++iter)
+    for (int iter = startTime * gels[0]->m_df; iter <= runstep; ++iter)
     {
         for (auto g : gels) {
             g->stepElasticity(iter);
             g->stepChemistry(iter);
+            g->recordCenter(iter);
         }
         coupler->packFromGels();
         fluid->stepVelocity(iter);

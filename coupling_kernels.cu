@@ -5,11 +5,6 @@
 #include "coupling_kernels.cuh"
 using namespace std;
 
-__device__ static float3 operator*(float a, float3 b)
-{
-	return make_float3(a * b.x, a * b.y, a * b.z);
-}
-
 __global__ void k_add_reaction_to_gel(int* bIndex, double3* Fn, double* un_norm, float3* Fl, float* Sl, int M)
 {
 	int l = blockDim.x * blockIdx.x + threadIdx.x;
