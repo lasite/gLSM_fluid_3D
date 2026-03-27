@@ -374,4 +374,5 @@ FodyWeavers.xsd
 *.log
 
 # Compiled executables
-/gLSM_*/
+/build/
+/results/
