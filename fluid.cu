@@ -10,6 +10,7 @@
 #include <sstream>
 #include <functional>
 #include <cuda_runtime.h>
+#include "gel.h"
 using namespace std;
 
 int Fluid::idx3(int x, int y, int z, int Nx, int Ny)
@@ -39,6 +40,8 @@ void Fluid::allocateDeviceStorage()
 	cudaMalloc(&d_F, N * sizeof(float3));
 	cudaMalloc(&d_F_ibm, N * sizeof(float3));
 	cudaMalloc(&d_F_tot, N * sizeof(float3));
+	cudaMalloc(&d_A, N * sizeof(float));
+	cudaMemset(d_A, 0, N * sizeof(float));
 }
 
 void Fluid::copyDataToDevice()
@@ -137,7 +140,7 @@ void Fluid::recordData(int time)
 void Fluid::writeFiles(int iter)
 {
 	double time = iter * dt;
-	if (iter % 1000 == 0) {
+	if (iter % 2000 == 0) {
 		if (file_writer_thread.joinable()) {
 			file_writer_thread.join();
 		}
@@ -191,8 +194,11 @@ d_A(0)
 	niu = 1e-6f;
 	dx_fluid = 40e-6f * h_fp->h;
 	dt_fluid = (h_fp->tau - 0.5f) * dx_fluid * dx_fluid / (3 * niu);
-	Nsub = int(dt / dt_fluid);
+	Nsub = max(1, (int)llround(dt / dt_fluid));
 	h_fp->beta = 1.0f;
+	if (const char* beta_env = getenv("IBM_BETA")) {
+		h_fp->beta = (float)atof(beta_env);
+	}
 	int3 c[19] = {
 	{0,0,0},
 	{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1},
@@ -211,6 +217,17 @@ d_A(0)
 	memcpy(h_fp->w, w, sizeof(w));
 	memcpy(h_fp->opp, opp, sizeof(opp));
 	h_fp->F_const = make_float3(0, 0, 0);
+
+	const float gel_to_lbm_vel = h_fp->h * dt_fluid / dt;
+	const float lbm_to_gel_vel = 1.0f / gel_to_lbm_vel;
+	coupler->h_cp->gel_to_lbm_vel = gel_to_lbm_vel;
+	coupler->h_cp->lbm_to_gel_vel = lbm_to_gel_vel;
+	cudaMemcpy(coupler->d_cp, coupler->h_cp, sizeof(CouplerParams), cudaMemcpyHostToDevice);
+	for (auto g : coupler->gels) {
+		g->m_hgp->lbm_to_gel_vel = lbm_to_gel_vel;
+		cudaMemcpy(g->m_dgp, g->m_hgp, sizeof(GelParams), cudaMemcpyHostToDevice);
+	}
+
 	_initialize(time);
 }
 
@@ -245,14 +262,18 @@ void Fluid::stepConcentration(int iter)
 
 void Fluid::stepVelocity(int iter)
 {
-	float ramp = fminf(1, (iter + 1) / 20000.0f);
+	float ramp_steps = 20000.0f;
+	if (const char* ramp_env = getenv("IBM_RAMP_STEPS")) {
+		ramp_steps = fmaxf(0.0f, (float)atof(ramp_env));
+	}
+	float ramp = (ramp_steps <= 0.0f) ? 1.0f : fminf(1.0f, (iter + 1) / ramp_steps);
 	float beta_eff = h_fp->beta * ramp;
 	double time = iter * dt;
 	for (int kk = 0; kk < Nsub; kk++) {
 		k_set_force << <blocksN, threads, 0, fluid_stream >> > (d_F, d_fp);
 		k_ibm_interpolate_velocity << <blocksM, threads, 0, fluid_stream >> > (d_u, coupler->d_Ul_all_, coupler->d_lag_all_, d_fp);
-		k_scale_negbeta << <blocksM, threads, 0, fluid_stream >> > (coupler->d_Ul_all_, coupler->d_Vl_all_, coupler->d_Fl_all_, beta_eff, d_fp);
-		k_ibm_spread_forces << <blocksM, threads, 0, fluid_stream >> > (d_F_ibm, coupler->d_Fl_all_, coupler->d_lag_all_, d_A, d_fp);
+		k_scale_negbeta << <blocksM, threads, 0, fluid_stream >> > (coupler->d_Ul_all_, coupler->d_Vl_all_, coupler->d_Fdrag_all_, beta_eff, d_fp);
+		k_ibm_spread_forces << <blocksM, threads, 0, fluid_stream >> > (d_F_ibm, coupler->d_Fdrag_all_, coupler->d_lag_all_, d_A, d_fp);
 		k_vec_add << <blocksN, threads, 0, fluid_stream >> > (d_F, d_F_ibm, d_F_tot, d_fp);
 		k_macros << <blocksN, threads, 0, fluid_stream >> > (d_f, d_rho, d_u, d_F_tot, d_fp);
 		k_collide << <blocksN, threads, 0, fluid_stream >> > (d_f, d_fpost, d_rho, d_u, d_F_tot, d_fp);

@@ -14,14 +14,23 @@ __global__ void k_add_reaction_to_gel(int* bIndex, double3* Fn, double* un_norm,
 	float3 f = Fl[l];
 	float s = Sl[l];
 
-	//Fn[id].x = -(double)f.x;
-	//Fn[id].y = -(double)f.y;
-	//Fn[id].z = -(double)f.z;
-	//un_norm[id] = -(double)s;
 	Fn[id].x -= (double)f.x;
 	Fn[id].y -= (double)f.y;
 	Fn[id].z -= (double)f.z;
 	un_norm[id] -= (double)s;
+}
+
+__global__ void k_add_drag_to_gel(int* bIndex, double3* Fdrag, float3* Fl, int M)
+{
+	int l = blockDim.x * blockIdx.x + threadIdx.x;
+	if (l >= M) return;
+
+	int id = bIndex[l];
+	float3 f = Fl[l];
+
+	Fdrag[id].x -= (double)f.x;
+	Fdrag[id].y -= (double)f.y;
+	Fdrag[id].z -= (double)f.z;
 }
 
 __device__ __forceinline__ float3 to_float3(const double3 a) {
@@ -31,7 +40,7 @@ __device__ __forceinline__ float3 to_float3(const double3 a) {
 }
 
 __global__ void k_gather_boundary(int* bIndex, double3* rn, double3* vn, double* un_norm,
-    float3* lag, float3* Vl, float* Cl, int M)
+    float3* lag, float3* Vl, float* Cl, int M, float gel_to_lbm_vel)
 {
         int l = blockDim.x * blockIdx.x + threadIdx.x;
         if (l >= M) return;
@@ -43,7 +52,9 @@ __global__ void k_gather_boundary(int* bIndex, double3* rn, double3* vn, double*
 	const double u = un_norm[id];
 
 	lag[l] = to_float3(r);
-	Vl[l] = to_float3(v);
+	Vl[l] = make_float3(__double2float_rn(v.x * gel_to_lbm_vel),
+		__double2float_rn(v.y * gel_to_lbm_vel),
+		__double2float_rn(v.z * gel_to_lbm_vel));
 	Cl[l] = __double2float_rn(u);
 }
 

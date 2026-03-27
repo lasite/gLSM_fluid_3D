@@ -15,6 +15,19 @@ struct GelParams {
 	int3 um_offset_periodic[27];
 	int gelType;
 	int maxFilamentlen;
+	float lbm_to_gel_vel;  // velocity unit conversion: LBM lattice vel → gel physical vel
+
+	// ── Tube mask (hollow cross-section along X) ───────────────────────────
+	// tube_mode: 0=solid (default), 1=square tube, 2=cylinder tube
+	// Mask is computed on-the-fly in kernels from element YZ indices.
+	// cy, cz : center of tube in element index space (1-based)
+	// inner_hy, inner_hz : inner half-size in Y and Z directions (element counts)
+	//   for cylinder: inner_hy == inner_hz == inner_radius (elements)
+	int   tube_mode;    // 0=solid, 1=square, 2=cylinder
+	float tube_cy;     // = (LY+1)/2.0
+	float tube_cz;     // = (LZ+1)/2.0
+	float tube_inner_hy;  // inner half-height in Y
+	float tube_inner_hz;  // inner half-height in Z
 };
 
 class Gel {
@@ -29,6 +42,16 @@ public:
 	void recordCenter(int iter);
     void _finalize();
 	void writeFiles(int iter);
+
+    // Phase-control helpers (used by sim_*.cpp entry points)
+    void resetToQuiescent();       // Set all chem fields to quiescent fixed point
+    void fireExcitationPulse();    // Inject BZ excitation at X=0 face
+    void setAnchorZ(double anchor_z); // Pin bottom-layer (zi==1) nodes in Z
+
+    // Tube/cylinder mask: hollow out the interior along X, keeping a wall of
+    // thickness wall_thickness elements in YZ.  circular=false → square tube.
+    // Must be called AFTER construction (setInitValue already ran).
+    void buildTubeMask(int wall_thickness, bool circular = false);
 
 public:
     void allocateHostStorage();
@@ -102,6 +125,7 @@ public:
 	double3* m_dVels;
 	double3* m_dFn;
 	double3* m_dFn_robin;
+	double3* m_dFdrag_robin;  // IBM drag force on boundary nodes (calNodesVelocityD/setZero)
 	double3* m_drm_loc;
 	double3* m_dnmSm;
 	double* m_dVolm;
@@ -135,4 +159,7 @@ public:
 	dim3 m_gridDim2;
 	bool flag = false;
 	unsigned int* d_hitCnt;
+    // Anchor support (set via setAnchorZ; used inside stepElasticity)
+    double m_anchor_z    = 0.0;
+    bool   m_use_anchor  = false;
 };

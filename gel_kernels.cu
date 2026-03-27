@@ -94,7 +94,26 @@ __device__ static double3 pow(double3 a, int b)
 
 __device__ static int get_index(int xi, int yi, int zi, int size, int LX, int LY)
 {
-	return xi + yi * (LX + size) + zi * (LY + size) * (LX + size);
+        return xi + yi * (LX + size) + zi * (LY + size) * (LX + size);
+}
+
+// Tube mask helper
+// Returns true if element (xi,yi,zi) is inside the hollow cavity.
+// tube_mode: 0=solid, 1=square, 2=cylinder.
+// Uses element 1-based indices directly from the kernel.
+__device__ static bool isVoidElement(int yi, int zi, GelParams* gp)
+{
+    if (gp->tube_mode == 0) return false;   // solid gel
+    float dy = (float)yi - gp->tube_cy;
+    float dz = (float)zi - gp->tube_cz;
+    if (gp->tube_mode == 1) {               // square tube
+        return (fabsf(dy) < gp->tube_inner_hy && fabsf(dz) < gp->tube_inner_hz);
+    }
+    // cylinder (mode 2)
+    float rhy = gp->tube_inner_hy, rhz = gp->tube_inner_hz;
+    if (rhy < 0.5f || rhz < 0.5f) return false;
+    float r2 = (dy*dy)/(rhy*rhy) + (dz*dz)/(rhz*rhz);
+    return (r2 < 1.0f);
 }
 
 __device__ static int get_index_rm_loc(int xi, int yi, int zi, int num, int LX, int LY)
@@ -496,7 +515,7 @@ __global__ void calPressureD(double* pm, double* vm, double* wm, GelParams* gp)
 	}
 }
 
-__global__ void calNodesVelocityD(double3* rn, double3* ven, double3* ves, double3* Fn, double3* Fn_robin, double3* nmSm, double* pm, double* wm, double* vn_norm, GelParams* gp)
+__global__ void calNodesVelocityD(double3* rn, double3* ven, double3* ves, double3* Fn, double3* Fn_robin, double3* Fdrag_robin, double3* nmSm, double* pm, double* wm, double* vn_norm, GelParams* gp)
 {
 	int xi = threadIdx.x + blockIdx.x * blockDim.x + 1;
 	int yi = threadIdx.y + blockIdx.y * blockDim.y + 1;
@@ -695,6 +714,12 @@ __global__ void calChemD(double* vm, double* um, double* wm, double* T0, double*
 		return;
 	}
 	int gi = get_index(xi, yi, zi, 1, LX, LY);
+	if (isVoidElement(yi, zi, gp)) {
+		vm[gi] = gp->vss;
+		um[gi] = gp->uss;
+		wm[gi] = gp->wss;
+		return;
+	}
 	//double I = gp->I * xi / gp->LX;
 	double I = 0;
 
@@ -752,7 +777,7 @@ __global__ void calChemBoundaryD(double* um, double* um_norm, double* vm, double
 	vm_norm[gi] = vm[gi] / (1 - wm[gi]);
 }
 
-__global__ void setZero(double* un_robin, double3* Fn_robin, GelParams* gp)
+__global__ void setZero(double* un_robin, double3* Fn_robin, double3* Fdrag_robin, GelParams* gp)
 {
 	int xi = threadIdx.x + blockIdx.x * blockDim.x + 1;
 	int yi = threadIdx.y + blockIdx.y * blockDim.y + 1;
@@ -838,4 +863,18 @@ __global__ void calFilamentD(double* vn_norm, double* un_norm, double3* filament
 		filament[time * gp->maxFilamentlen + gi].y = yi + yb;
 		filament[time * gp->maxFilamentlen + gi].z = zi;
 	}
+}
+// ── anchorBottomNodesD ────────────────────────────────────────────────────────
+// Pins the bottom interior layer (zi==1) of gel nodes: zeros their velocity
+// and restores the reference z position so the base cannot drift.
+__global__ void anchorBottomNodesD(double3* rn, double3* ven, double anchor_z, GelParams* gp)
+{
+    int xi = blockIdx.x * blockDim.x + threadIdx.x;
+    int yi = blockIdx.y * blockDim.y + threadIdx.y;
+    int zi = blockIdx.z * blockDim.z + threadIdx.z;
+    int LX = gp->LX, LY = gp->LY, LZ = gp->LZ;
+    if (xi < 1 || xi > LX || yi < 1 || yi > LY || zi != 1) return;
+    int gi = xi + yi * (LX + 2) + zi * (LX + 2) * (LY + 2);
+    ven[gi].x = 0.0; ven[gi].y = 0.0; ven[gi].z = 0.0;
+    rn[gi].z = anchor_z;
 }

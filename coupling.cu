@@ -16,7 +16,8 @@ void Coupler::allocateDeviceStorage()
     cudaMalloc(&d_lag_all_, sizeof(float3) * sumGelBoundaryCount);
     cudaMalloc(&d_Ul_all_, sizeof(float3) * sumGelBoundaryCount);
     cudaMalloc(&d_Vl_all_, sizeof(float3) * sumGelBoundaryCount);
-    cudaMalloc(&d_Fl_all_, sizeof(float3) * sumGelBoundaryCount);
+    cudaMalloc(&d_Fdrag_all_, sizeof(float3) * sumGelBoundaryCount);
+    cudaMalloc(&d_Frep_all_, sizeof(float3) * sumGelBoundaryCount);
     cudaMalloc(&d_Cl_all_, sizeof(float) * sumGelBoundaryCount);
     cudaMalloc(&d_Sl_all_, sizeof(float) * sumGelBoundaryCount);
     cudaMalloc(&d_Dl_all_, sizeof(float) * sumGelBoundaryCount);
@@ -51,7 +52,8 @@ Coupler::Coupler(std::vector<Gel*>& gels) :
     d_lag_all_(0),
     d_Ul_all_(0),
     d_Vl_all_(0),
-    d_Fl_all_(0),
+    d_Fdrag_all_(0),
+    d_Frep_all_(0),
     d_Cl_all_(0),
     d_Sl_all_(0),
     d_Dl_all_(0),
@@ -72,6 +74,8 @@ Coupler::Coupler(std::vector<Gel*>& gels) :
     h_cp->M = sumGelBoundaryCount;
     h_cp->delta = 1e-4f;
     h_cp->gamma = 1.5f;
+    h_cp->gel_to_lbm_vel = 1.0f;
+    h_cp->lbm_to_gel_vel = 1.0f;
     _initialize();
 }
 
@@ -88,7 +92,8 @@ void Coupler::packFromGels() {
             d_lag_all_ + off,
             d_Vl_all_ + off,
             d_Cl_all_ + off,
-            Mi);
+            Mi,
+            h_cp->gel_to_lbm_vel);
     }
 }
 
@@ -101,14 +106,20 @@ void Coupler::scatterToGels() {
             gels[i]->m_dbIndex,
             gels[i]->m_dFn_robin,
             gels[i]->m_dun_robin,
-            d_Fl_all_ + off,
+            d_Frep_all_ + off,
             d_Sl_all_ + off,
+            Mi);
+        k_add_drag_to_gel<<<blocks, threads, 0, gels[i]->m_gel_stream >>>(
+            gels[i]->m_dbIndex,
+            gels[i]->m_dFdrag_robin,
+            d_Fdrag_all_ + off,
             Mi);
     }
 }
 
 void Coupler::applyGelRepulsion() {
-    k_gel_repulsion << <blocksM, threads, 0, coupler_stream >> > (d_lag_all_, d_owner, d_Fl_all_, d_cp);
+    cudaMemsetAsync(d_Frep_all_, 0, sizeof(float3) * sumGelBoundaryCount, coupler_stream);
+    k_gel_repulsion << <blocksM, threads, 0, coupler_stream >> > (d_lag_all_, d_owner, d_Frep_all_, d_cp);
 }
 
 void Coupler::_initialize()
@@ -130,7 +141,8 @@ void Coupler::freeDeviceMemory()
     cudaFree(d_lag_all_);
     cudaFree(d_Ul_all_);
     cudaFree(d_Vl_all_);
-    cudaFree(d_Fl_all_);
+    cudaFree(d_Fdrag_all_);
+    cudaFree(d_Frep_all_);
     cudaFree(d_Cl_all_);
     cudaFree(d_Sl_all_);
     cudaFree(d_Dl_all_);

@@ -90,6 +90,7 @@ void Gel::allocateDeviceStorage()
 
 	cudaMalloc((void**)&m_dFn, m_numGelNodes * sizeof(double3));
 	cudaMalloc((void**)&m_dFn_robin, m_numGelNodes * sizeof(double3));
+	cudaMalloc((void**)&m_dFdrag_robin, m_numGelNodes * sizeof(double3));
 	cudaMalloc((void**)&m_dVeln, m_numGelNodes * sizeof(double3));
 	cudaMalloc((void**)&m_dVels, m_numGelNodes * sizeof(double3));
 
@@ -407,6 +408,7 @@ void Gel::freeDeviceMemory()
 	cudaFree(m_drm);
 	cudaFree(m_dFn);
 	cudaFree(m_dFn_robin);
+	cudaFree(m_dFdrag_robin);
 	cudaFree(m_dVeln);
 	cudaFree(m_dVels);
 	cudaFree(m_drm_loc);
@@ -686,11 +688,13 @@ void Gel::stepElasticity(int iter)
 		calChemBoundaryD << < m_gridDim1, m_blockDim, 0, m_gel_stream >> > (m_dum, m_dum_norm, m_dvm, m_dvm_norm, m_dwm, m_dmap_element, time, m_dgp);
 		calUnnormD << < m_gridDim0, m_blockDim, 0, m_gel_stream >> > (m_dun_norm, m_dun_robin, m_dum_norm, m_dvn_norm, m_dvm_norm, m_dgp);
 		calPressureD << < m_gridDim_1, m_blockDim, 0, m_gel_stream >> > (m_dPrem, m_dvm, m_dwm, m_dgp);
-		calNodesVelocityD << < m_gridDim0, m_blockDim, 0, m_gel_stream >> > (m_drn, m_dVeln, m_dVels, m_dFn, m_dFn_robin, m_dnmSm, m_dPrem, m_dwm, m_dvn_norm, m_dgp);
+		calNodesVelocityD << < m_gridDim0, m_blockDim, 0, m_gel_stream >> > (m_drn, m_dVeln, m_dVels, m_dFn, m_dFn_robin, m_dFdrag_robin, m_dnmSm, m_dPrem, m_dwm, m_dvn_norm, m_dgp);
 		calInternalNodesPositionD << < m_gridDim0, m_blockDim, 0, m_gel_stream >> > (m_drn, m_dVeln, m_dgp);
+		if (m_use_anchor)
+			anchorBottomNodesD <<< m_gridDim0, m_blockDim, 0, m_gel_stream >>>(m_drn, m_dVeln, m_anchor_z, m_dgp);
 		calTermsD << < m_gridDim_1, m_blockDim, 0, m_gel_stream >> > (m_dT0m, m_dT1m, m_dT2m, m_dwm, m_dwmp, m_dVeln, m_dnmSm, m_dVolm, m_drm_loc, m_dun_norm, m_dum_norm, m_drm, m_dgp);
 	}
-	setZero << < m_gridDim0, m_blockDim, 0, m_gel_stream >> > (m_dun_robin, m_dFn_robin, m_dgp);
+	setZero << < m_gridDim0, m_blockDim, 0, m_gel_stream >> > (m_dun_robin, m_dFn_robin, m_dFdrag_robin, m_dgp);
 }
 
 void Gel::stepChemistry(int iter)
@@ -716,4 +720,148 @@ void Gel::_finalize()
     cudaStreamDestroy(m_gel_stream);
 	freeHostMemory();
 	freeDeviceMemory();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase-control helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Reset all chemical fields to a nearly-quiescent fixed point (very small u,v)
+// so the gel stays inactive until an explicit excitation pulse is fired.
+void Gel::resetToQuiescent()
+{
+    int LX = m_gelNodeGrid.x;
+    int LY = m_gelNodeGrid.y;
+    int LZ = m_gelNodeGrid.z;
+    for (int zi = 1; zi <= LZ; zi++)
+        for (int yi = 1; yi <= LY; yi++)
+            for (int xi = 1; xi <= LX; xi++) {
+                int gi = get_index(xi, yi, zi, 1);
+                m_hum[gi] = m_hgp->uss * 0.01;  // far below excitation threshold
+                m_hvm[gi] = m_hgp->vss * 0.01;
+                m_hwm[gi] = m_hgp->wss;
+            }
+    cudaMemcpy(m_dum, m_hum, sizeof(double) * m_numGelElements, cudaMemcpyHostToDevice);
+    cudaMemcpy(m_dvm, m_hvm, sizeof(double) * m_numGelElements, cudaMemcpyHostToDevice);
+    cudaMemcpy(m_dwm, m_hwm, sizeof(double) * m_numGelElements, cudaMemcpyHostToDevice);
+}
+
+// Inject an above-threshold BZ excitation pulse at the X=0 face (xi=1..3).
+// This seeds a travelling chemical wave that propagates in the +X direction.
+void Gel::fireExcitationPulse()
+{
+    int LX = m_gelNodeGrid.x;
+    int LY = m_gelNodeGrid.y;
+    int LZ = m_gelNodeGrid.z;
+    int pulse_width = max(1, LX / 10);  // excite first ~10% of gel in X
+    for (int zi = 1; zi <= LZ; zi++)
+        for (int yi = 1; yi <= LY; yi++) {
+            // Check if this (yi,zi) is in the void cavity
+            bool is_void = false;
+            float cy = m_hgp->tube_cy;
+            float cz = m_hgp->tube_cz;
+            float dy = (float)yi - cy;
+            float dz = (float)zi - cz;
+            if (m_hgp->tube_mode == 1) {
+                is_void = (fabsf(dy) < m_hgp->tube_inner_hy && fabsf(dz) < m_hgp->tube_inner_hz);
+            } else if (m_hgp->tube_mode == 2) {
+                float rhy = m_hgp->tube_inner_hy, rhz = m_hgp->tube_inner_hz;
+                if (rhy >= 0.5f && rhz >= 0.5f) {
+                    is_void = ((dy*dy)/(rhy*rhy) + (dz*dz)/(rhz*rhz) < 1.0f);
+                }
+            }
+            if (is_void) continue;
+
+            for (int xi = 1; xi <= pulse_width; xi++) {
+                int gi = get_index(xi, yi, zi, 1);
+                m_hum[gi] = m_hgp->uss * 3.0;  // above threshold → triggers wave
+                m_hvm[gi] = m_hgp->vss * 0.1;  // low inhibitor → fast excitation
+            }
+        }
+    cudaMemcpy(m_dum, m_hum, sizeof(double) * m_numGelElements, cudaMemcpyHostToDevice);
+    cudaMemcpy(m_dvm, m_hvm, sizeof(double) * m_numGelElements, cudaMemcpyHostToDevice);
+}
+
+// Anchor the bottom layer of nodes (zi == 1 in interior indexing) so that
+// the gel base does not drift. The anchorBottomNodesD kernel enforces this
+// every elasticity step.
+void Gel::setAnchorZ(double anchor_z)
+{
+    // Store the anchor z-coordinate in a member for the kernel to use.
+    // The anchorBottomNodesD kernel declared in gel_kernels.cuh is launched
+    // inside stepElasticity; we just need to enable it by recording the value.
+    m_anchor_z = anchor_z;
+    m_use_anchor = true;
+}
+// ─────────────────────────────────────────────────────────────────────────────
+// buildTubeMask: hollow out the gel interior to create a square or circular
+// tube running along the X axis.
+//
+// Algorithm:
+//   For each interior element (xi,yi,zi), compute normalized distance from the
+//   tube axis (centre-line at yi=cy, zi=cz).  If the element is INSIDE the
+//   inner cavity it is a "void" element: its chem fields are clamped to the
+//   quiescent steady state and lbm_to_gel_vel conversion ensures pressure stays
+//   zero.  The mask is stored in GelParams (all via device constant memory)
+//   and applied inside calChemD / calPressureD on the GPU.
+//
+//   wall_thickness : number of element layers kept as gel wall (>=1)
+//   circular       : false → rectangular/square tube,  true → cylindrical tube
+// ─────────────────────────────────────────────────────────────────────────────
+void Gel::buildTubeMask(int wall_thickness, bool circular)
+{
+    int LX = m_gelNodeGrid.x;
+    int LY = m_gelNodeGrid.y;
+    int LZ = m_gelNodeGrid.z;
+
+    // Tube axis is at element centre (1-based indexing, so centre ≈ (LY+1)/2)
+    float cy = (LY + 1) * 0.5f;
+    float cz = (LZ + 1) * 0.5f;
+
+    // Inner half-extents: full half-extent minus wall thickness
+    float inner_hy = (LY * 0.5f) - wall_thickness;
+    float inner_hz = (LZ * 0.5f) - wall_thickness;
+    if (inner_hy <= 0) inner_hy = 0;
+    if (inner_hz <= 0) inner_hz = 0;
+
+    // Store in GelParams so kernels can access on GPU
+    m_hgp->tube_mode     = circular ? 2 : 1;
+    m_hgp->tube_cy       = cy;
+    m_hgp->tube_cz       = cz;
+    m_hgp->tube_inner_hy = inner_hy;
+    m_hgp->tube_inner_hz = inner_hz;
+
+    // Also reset void elements' chemistry to quiescent steady state on Host
+    for (int zi = 1; zi <= LZ; zi++) {
+        for (int yi = 1; yi <= LY; yi++) {
+            float dy = (float)yi - cy;
+            float dz = (float)zi - cz;
+            bool is_void;
+            if (circular) {
+                float r2 = dy*dy/(inner_hy*inner_hy + 1e-6f) + dz*dz/(inner_hz*inner_hz + 1e-6f);
+                is_void = (inner_hy > 0 && inner_hz > 0 && r2 < 1.0f);
+            } else {
+                is_void = (fabsf(dy) < inner_hy && fabsf(dz) < inner_hz);
+            }
+            if (!is_void) continue;
+            for (int xi = 1; xi <= LX; xi++) {
+                int gi = get_index(xi, yi, zi, 1);
+                m_hum[gi] = m_hgp->uss;
+                m_hvm[gi] = m_hgp->vss;
+                m_hwm[gi] = m_hgp->wss;   // wss ≈ FA0 → zero osmotic drive
+            }
+        }
+    }
+
+    // Upload updated params and chemistry fields to GPU
+    cudaMemcpy(m_dgp, m_hgp, sizeof(GelParams), cudaMemcpyHostToDevice);
+    cudaMemcpy(m_dum, m_hum, sizeof(double) * m_numGelElements, cudaMemcpyHostToDevice);
+    cudaMemcpy(m_dvm, m_hvm, sizeof(double) * m_numGelElements, cudaMemcpyHostToDevice);
+    cudaMemcpy(m_dwm, m_hwm, sizeof(double) * m_numGelElements, cudaMemcpyHostToDevice);
+
+    printf("[buildTubeMask] mode=%s  wall_thickness=%d\n",
+           circular ? "cylinder" : "square", wall_thickness);
+    printf("  LY=%d LZ=%d  cy=%.1f cz=%.1f  inner_hy=%.1f inner_hz=%.1f\n",
+           LY, LZ, cy, cz, inner_hy, inner_hz);
+    fflush(stdout);
 }

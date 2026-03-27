@@ -7,6 +7,8 @@ struct CouplerParams {
 	int  M;
 	float delta;
 	float gamma;
+	float gel_to_lbm_vel;
+	float lbm_to_gel_vel;
 };
 
 class Coupler {
@@ -38,7 +40,8 @@ public:
 	float3* d_lag_all_;
 	float3* d_Ul_all_;
 	float3* d_Vl_all_;
-	float3* d_Fl_all_;
+	float3* d_Fdrag_all_;
+	float3* d_Frep_all_;
 	float* d_Cl_all_;
 	float* d_Dl_all_;
 	float* d_Sl_all_;

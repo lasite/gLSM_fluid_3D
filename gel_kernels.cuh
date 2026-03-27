@@ -5,7 +5,7 @@ __global__ void calElementPropertiesD(double3* rn, double3* rm, double3* rm_loc,
 
 __global__ void calPressureD(double* pm, double* vm, double* wm, GelParams* gp);
 
-__global__ void calNodesVelocityD(double3* rn, double3* ven, double3* ves, double3* Fn, double3* Fn_robin, double3* nmSm, double* pm, double* wm, double* vn_norm, GelParams* gp);
+__global__ void calNodesVelocityD(double3* rn, double3* ven, double3* ves, double3* Fn, double3* Fn_robin, double3* Fdrag_robin, double3* nmSm, double* pm, double* wm, double* vn_norm, GelParams* gp);
 
 __global__ void calInternalNodesPositionD(double3* rn, double3* ven, GelParams* gp);
 
@@ -19,10 +19,13 @@ __global__ void calChemBoundaryD(double* um, double* um_norm, double* vm, double
 
 __global__ void calUnnormD(double* un_norm, double* un_robin, double* um_norm, double* vn_norm, double* vm_norm, GelParams* gp);
 
-__global__ void setZero(double* un_robin, double3* Fn_robin, GelParams* gp);
+__global__ void setZero(double* un_robin, double3* Fn_robin, double3* Fdrag_robin, GelParams* gp);
 
 __global__ void recordCenterElementD(double* vm_center, double* wm_center, double3* rm_center, double3* Fn_center, double3* Veln_center, double* vm, double* wm, double3* rm, double3* Fn, double3* Veln, int time, GelParams* gp);
 
 __global__ void calFilamentD(double* vn_norm, double* un_norm, double3* filament, int time, unsigned int* hitCnt, GelParams* gp);
+
+// Anchor bottom layer (zi==1) nodes: zero velocity and restore initial z position
+__global__ void anchorBottomNodesD(double3* rn, double3* ven, double anchor_z, GelParams* gp);
 
 #endif

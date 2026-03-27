@@ -364,3 +364,14 @@ FodyWeavers.xsd
 /0
 /xy_slice.avi
 /data
+
+# Simulation data directories
+/data_*/
+/vis_output/
+/viz/
+*.avi
+*.mp4
+*.log
+
+# Compiled executables
+/gLSM_*/
